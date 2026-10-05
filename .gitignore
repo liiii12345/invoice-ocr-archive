@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# 凭据 / 密钥（一律不进仓库）
+*.pem
+*.key
+*.p12
+.env
+
+# 数据：原始扫描件、转换产物、请求与响应快照
+datasets/
+archive*/
+data/*.pdf
+data/*.jpg
+data/*.png
+*.b64
+payload*.json
+cp_intl.json
+
+# 日志与临时产物
+*.log
+tmp/
+.DS_Store
+Thumbs.db
+
+# 归档库文件
+*.db
+*.db-journal
