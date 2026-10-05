@@ -160,11 +160,29 @@ python tools/console_server.py --port 8770 --root .
 │   └── eval_llm.py                   LLM 抽取评测
 ├── tools/
 │   ├── make_demo_data.py             生成合成演示数据（PIL 现画预览图）
-│   └── build_console.py              把合成数据注入控制台，产出公开版 demo_console.html
-├── docs/                             设计说明、真实性与边界说明、接入指南、调研报告
+│   ├── build_console.py              把合成数据注入控制台
+│   ├── build_batch_ui.py             ★ 把批量参数注入控制台，产出「批量测试」页签（幂等，可重复跑）
+│   ├── _runblock.js                  「运行」逻辑源（实跑 SSE / 离线沙箱两条分支）
+│   ├── console_server.py             可选本地后端，只听 127.0.0.1，让页签能真跑 batch_run.py
+│   └── _check_batch_ui.js            页签回归测试（jsdom，30 条断言，`npm i jsdom` 后 `node tools/_check_batch_ui.js`）
+├── docs/                             设计说明、真实性与边界说明、接入指南、调研结论、页签示意图
 ├── requirements.txt
 └── LICENSE
 ```
+
+### 控制台是怎么构建出来的
+
+`demo_console.html` 是**构建产物**，别手改它。源码在 `tools/build_console.py`（文档档案视图）与
+`tools/build_batch_ui.py`（批量测试视图）两个注入器里，都幂等——反复跑只会覆盖自己那一段：
+
+```bash
+python tools/build_console.py            # 重建基础控制台
+python tools/build_batch_ui.py           # 本地版：带你机器上的数据集预设，跑「实跑」用
+python tools/build_batch_ui.py --public  # 公开版：只留仓库内置合成样例，可推 GitHub
+```
+
+本地版会把你自己磁盘上的数据集目录写进预设里（控制台一开就能选），公开版必须走 `--public`
+——否则真实路径会跟着产物一起出仓库。
 
 ---
 
