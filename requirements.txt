@@ -1,0 +1,11 @@
+# 最小集：合规链路自测 + 服务可用
+cryptography>=42
+
+# 本地 OCR（离线通道）
+rapidocr-onnxruntime>=1.3
+
+# 图像处理（预览图生成 / 降采样）
+Pillow>=10
+
+# LLM 抽取（可选；不配 OCR_LLM_* 时规则抽取与 hybrid 仍可用）
+requests>=2.31
