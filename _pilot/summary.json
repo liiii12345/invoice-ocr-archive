@@ -1,0 +1,36 @@
+{
+  "generated": "2026-10-06 01:38:02",
+  "extractor": "rule",
+  "total": 20,
+  "ok": 20,
+  "failed": 0,
+  "vtype_distribution": {
+    "intl-commercial": 20
+  },
+  "field_nonempty_rate": {
+    "invoice_number": 1.0,
+    "invoice_date": 1.0,
+    "seller_name": 1.0,
+    "client_name": 1.0,
+    "tax": 1.0,
+    "total": 1.0
+  },
+  "field_accuracy_vs_truth": {
+    "invoice_number": 1.0,
+    "invoice_date": 1.0,
+    "seller_name": 1.0,
+    "client_name": 1.0,
+    "tax": 1.0,
+    "total": 0.95
+  },
+  "items_full_match": "19/20",
+  "elapsed": {
+    "sum": 151.87,
+    "avg": 7.593,
+    "p50": 7.28,
+    "p90": 9.463,
+    "max": 14.792,
+    "wall": 154.44
+  },
+  "throughput": "7.8 张/分钟"
+}
