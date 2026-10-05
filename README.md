@@ -1,12 +1,12 @@
 # Invoice OCR & Compliance Archive
 
-面向企业侧票据的 **OCR 识别 → 票种判定 → 税务合规核验 → 结构化抽取 → 归档检索** 一条链路，
+面向企业侧票据的 **OCR 识别 → 票种判定 → 税务合规核验 → 结构化抽取 → 归档检索** 一条链路，  
 单进程可跑、无外部服务依赖、无真实企业凭据也能验证。
 
 - **不依赖任何密钥就能跑通**：`python src/compliance_provider.py` 跑完整合规自测（23 项全绿）。
-- **验签是真密码学，不是一路绿灯**：标准 XMLDSig（C14N 1.0 + RSA-SHA256 + 摘要比对），
+- **验签是真密码学，不是一路绿灯**：标准 XMLDSig（C14N 1.0 + RSA-SHA256 + 摘要比对），  
   换一颗无关公钥立即验不过，改一个金额必被摘要检出。
-- **控制台双击即开**：`demo_console.html` 是单文件交互控制台，数据全部内嵌，离线可用。
+- **控制台双击即开**：`demo_console.html` 是单文件交互控制台，数据全部内嵌，离线可用。                                                                                        
 
 ---
 
@@ -60,6 +60,52 @@ open demo_console.html
  ⑥ 交互控制台 ───────────── demo_console.html（概览 / 抽取字段 / OCR 原文 / 预览 / 风险印章）
 ```
 
+
+
+---
+
+## 批量测试：丢一整批图片进去，直接出汇总表和准确率
+
+`src/batch_run.py` 是批量入口——逐张跑「OCR → 票种判定 → 抽取 → 合规链路」，
+最后落一张 `results.csv` + 一份 `summary.json`（含字段级准确率）。
+
+```bash
+# 摸底 20 张：目录/glob 都行，--truth 带真值就顺带算准确率
+python src/batch_run.py \
+    --input "D:/data/batch_1/batch1_1/*.jpg" \
+    --limit 20 --out out/ --truth D:/data/batch_1/batch1_1.csv
+
+# 断点续跑：上次成功的自动跳过
+python src/batch_run.py --input D:/data/batch_1 --resume --out out/
+
+# 换抽取策略 / 多进程
+python src/batch_run.py --input list.txt --extractor hybrid --workers 4 --out out/
+```
+
+**输入四种写法**（`--input` 可重复传，自动去重）：
+
+| 写法 | 说明 |
+| :- | :- |
+| `--input 目录` | 递归扫 jpg/jpeg/png/webp/bmp |
+| `--input "glob 模式"` | 用引号包住，如 `"D:/data/**/*.jpg"` |
+| `--input list.txt` | 每行一个路径，`#` 开头是注释 |
+| `--input truth.csv` | 第一列文件名，配合 `--base` 拼绝对路径 |
+
+**输出**（都在 `--out` 目录下）：
+
+| 文件 | 内容 |
+| :- | :- |
+| `results.csv` | 一文件一行：文件名 / 成败 / 票种 **code + 中文名** / 平均置信度 / OCR 行数 / 耗时 / 六个字段值 / 明细条数 / 失败原因 |
+| `summary.json` | 总览：成功失败数、票种分布、字段非空率、字段准确率、明细一致率、耗时 avg/p50/p90/max、吞吐张每分钟 |
+| `failed.txt` | 失败清单（带原因） |
+| `results_detail.json` | 加 `--detail`：每张的 OCR 全文、字段证据坐标、完整记录 |
+
+准确率口径与 `src/eval_extract.py` 完全一致（数字对得上）：
+文本字段归一化后全等且非空；金额字段 `parse_amount` 后差值 < 0.02；明细要条数一致且同序 quantity / total_price 都对。
+
+实测（英文商业发票 20 张，`--extractor rule`）：20/20 成功，
+字段准确率 5/6 = 1.0（total 0.95），明细全对 19/20，平均 7.6s/张、约 7.8 张/分钟。
+
 ---
 
 ## 目录结构
@@ -70,6 +116,7 @@ open demo_console.html
 ├── data/
 │   └── synthetic_demo_data.json      控制台演示数据（全合成样例）
 ├── src/
+│   ├── batch_run.py                  ★ 批量测试入口：一整批图片 → results.csv + summary.json
 │   ├── compliance_provider.py        ★ 合规能力：法定原件 / 验签 / 查验，Mock 与 Real 同接口
 │   ├── ocr_service.py                本地服务入口（HTTP + 批处理）
 │   ├── invoice_extract.py            规则抽取器（版面坐标推理）
@@ -92,12 +139,12 @@ open demo_console.html
 
 `ComplianceProvider` 两个实现（`MockComplianceProvider` / `RealComplianceProvider`）共用同一份标准 XMLDSig 实现：
 
-| 环节 | 做法 |
-| :-- | :-- |
+| 环节 | 做法                                                                      |
+| :- | :---------------------------------------------------------------------- |
 | 摘要 | SHA256 over `c14n(摘掉 ds:Signature 的 XML)`，enveloped-signature transform |
-| 签名 | RSA-SHA256（`rsa-sha256`）over `c14n(SignedInfo)` |
-| 验签 | 先验签名，再比对 `Reference/DigestValue`，**两关都过才判有效** |
-| 节点 | `<ds:Signature>`，标准命名空间（序列化走 `ds` 前缀） |
+| 签名 | RSA-SHA256（`rsa-sha256`）over `c14n(SignedInfo)`                         |
+| 验签 | 先验签名，再比对 `Reference/DigestValue`，**两关都过才判有效**                           |
+| 节点 | `<ds:Signature>`，标准命名空间（序列化走 `ds` 前缀）                                   |
 
 切换实现只改一个环境变量，**业务代码零改动**：
 
@@ -106,8 +153,8 @@ export OCR_COMPLIANCE_PROVIDER=mock     # 默认，本地即可跑通全部验�
 export OCR_COMPLIANCE_PROVIDER=real     # 接税局真实链路
 ```
 
-`RealComplianceProvider` 覆盖 OAuth2 换 token → `/api/invoice/download` 取 XML/OFD/PDF →
-共用 `verify_signature` → 查验结论 24h 缓存 + 状态码映射
+`RealComplianceProvider` 覆盖 OAuth2 换 token → `/api/invoice/download` 取 XML/OFD/PDF →  
+共用 `verify_signature` → 查验结论 24h 缓存 + 状态码映射  
 （`1000` 正常 / `1001` 作废 / `1002` 红冲 / `1003` 查无 / `1004` 超限）。
 
 **缺保密凭据时不抛异常、不伪造成功**，而是如实返回原因，例如：
@@ -121,13 +168,13 @@ export OCR_COMPLIANCE_PROVIDER=real     # 接税局真实链路
 
 ## 涉密参数（一律走环境变量，仓库内不落盘）
 
-| 变量 | 含义 |
-| :-- | :-- |
-| `OCR_COMPLIANCE_PROVIDER` | `mock` / `real`，切换合规实现 |
-| `OCR_LEQI_BASE_URL` / `OCR_LEQI_TOKEN` / `OCR_LEQI_CLIENT_SECRET` | 税局侧凭据 |
-| `OCR_TAX_ROOT_CERT` / `OCR_TAX_CERT_SERIAL` | 税务根证书公钥、证书序列号白名单 |
-| `OCR_VERIFY_API_URL` / `OCR_CA_BUNDLE` / `OCR_VERIFY_CACHE` | 查验接口、CA Bundle、缓存文件 |
-| `OCR_LLM_*` | LLM 抽取的模型与凭据 |
+| 变量                                                                | 含义                     |
+| :---------------------------------------------------------------- | :--------------------- |
+| `OCR_COMPLIANCE_PROVIDER`                                         | `mock` / `real`，切换合规实现 |
+| `OCR_LEQI_BASE_URL` / `OCR_LEQI_TOKEN` / `OCR_LEQI_CLIENT_SECRET` | 税局侧凭据                  |
+| `OCR_TAX_ROOT_CERT` / `OCR_TAX_CERT_SERIAL`                       | 税务根证书公钥、证书序列号白名单       |
+| `OCR_VERIFY_API_URL` / `OCR_CA_BUNDLE` / `OCR_VERIFY_CACHE`       | 查验接口、CA Bundle、缓存文件    |
+| `OCR_LLM_*`                                                       | LLM 抽取的模型与凭据           |
 
 真实发票影像、开票方信息、企业凭据**均不包含在本仓库内**；仓库内的演示数据是合成样例。
 
@@ -154,7 +201,7 @@ python tools/build_console.py <本地demo_console.html> demo_console.html
 ## 已知边界
 
 - **国密 SM2**：税局部分链路用 SM2，需 `gmssl` 一类国密库；`cryptography` 不覆盖，仓库内未实现。
-- **C14N**：标准库 `xml.etree.ElementTree.canonicalize` 只支持 C14N 1.0（inclusive）；
+- **C14N**：标准库 `xml.etree.ElementTree.canonicalize` 只支持 C14N 1.0（inclusive）；  
   若税局下发用 exc-c14n 或 c14n-11，需换 `lxml` 实现。
 - **查验限流**：税务局查验有频次限制，必须走缓存（本仓库 `OCR_VERIFY_CACHE`，TTL 24h）。
 - **复刻版不冒充真实结果**：本仓库不发真实税局请求、不落企业凭据，任何界面也不会把合成数据显示成真实查验结论。
