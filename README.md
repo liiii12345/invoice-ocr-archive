@@ -1,0 +1,166 @@
+# Invoice OCR & Compliance Archive
+
+面向企业侧票据的 **OCR 识别 → 票种判定 → 税务合规核验 → 结构化抽取 → 归档检索** 一条链路，
+单进程可跑、无外部服务依赖、无真实企业凭据也能验证。
+
+- **不依赖任何密钥就能跑通**：`python src/compliance_provider.py` 跑完整合规自测（23 项全绿）。
+- **验签是真密码学，不是一路绿灯**：标准 XMLDSig（C14N 1.0 + RSA-SHA256 + 摘要比对），
+  换一颗无关公钥立即验不过，改一个金额必被摘要检出。
+- **控制台双击即开**：`demo_console.html` 是单文件交互控制台，数据全部内嵌，离线可用。
+
+---
+
+## 快速开始
+
+```bash
+# 1) 只跑合规链路自测（唯一依赖 cryptography）
+pip install cryptography
+python src/compliance_provider.py
+
+# 2) 跑完整 OCR + 抽取（额外需要本地推理与图像库）
+pip install -r requirements.txt
+python src/ocr_service.py --host 127.0.0.1 --port 8765
+
+# 3) 打开交互控制台（浏览器直接打开，无需起服务）
+open demo_console.html
+```
+
+自测输出末尾会打一行 `通过 23 / 23`；其中关键的三条：
+
+```
+✓ Real 用「税务根证书公钥」验签 Mock 签发的 XML   → 通过（同一份 _xml_verify）
+      换一颗无关公钥                              → 失败（SignedInfo 不匹配）
+      篡改正文金额                                → 失败（内容摘要不一致）
+```
+
+---
+
+## 系统链路
+
+```
+ 原始文件（图片 / PDF）
+        │
+        ▼
+ ① OCR 识别 ─────────────── 本地 RapidOCR（ONNX）／云端多模态模型双通道，失败自动降采样重试
+        │  正文 + 版面坐标
+        ▼
+ ② 票种判定 ─────────────── vtype_classify，输出「适用 / 不适用 / 待人工」三态
+        │
+        ├─── 适用 ──► ③a 取法定原件（XML / OFD / PDF）
+        │                 ③b 税务数字签名验签（XMLDSig）
+        │                 ③c 税务局查验（含 24h 缓存）
+        │             （三者由 ComplianceProvider 统一接口，可 Mock / Real 切换）
+        ▼
+ ④ 结构化抽取 ───────────── 规则抽取（版面坐标推理）／LLM 抽取／hybrid 融合
+        │  统一字段字典（FIELD_KEYS）+ 逐字段裁决
+        ▼
+ ⑤ 归档与检索 ───────────── SQLite 索引，内容 sha256 去重，全文检索
+        │
+        ▼
+ ⑥ 交互控制台 ───────────── demo_console.html（概览 / 抽取字段 / OCR 原文 / 预览 / 风险印章）
+```
+
+---
+
+## 目录结构
+
+```
+.
+├── demo_console.html                 单文件交互控制台（数据内嵌，离线打开即用）
+├── data/
+│   └── synthetic_demo_data.json      控制台演示数据（全合成样例）
+├── src/
+│   ├── compliance_provider.py        ★ 合规能力：法定原件 / 验签 / 查验，Mock 与 Real 同接口
+│   ├── ocr_service.py                本地服务入口（HTTP + 批处理）
+│   ├── invoice_extract.py            规则抽取器（版面坐标推理）
+│   ├── llm_extract.py                LLM 抽取器 + hybrid 融合
+│   ├── vtype_classify.py             票种判定与「适用性」三态
+│   ├── extract_samples.py            样例导出（PIL）
+│   ├── eval_extract.py               规则抽取评测
+│   └── eval_llm.py                   LLM 抽取评测
+├── tools/
+│   ├── make_demo_data.py             生成合成演示数据（PIL 现画预览图）
+│   └── build_console.py              把合成数据注入控制台，产出公开版 demo_console.html
+├── docs/                             设计说明、真实性与边界说明、接入指南、调研报告
+├── requirements.txt
+└── LICENSE
+```
+
+---
+
+## 合规链路：算法一致，只有信任源不同
+
+`ComplianceProvider` 两个实现（`MockComplianceProvider` / `RealComplianceProvider`）共用同一份标准 XMLDSig 实现：
+
+| 环节 | 做法 |
+| :-- | :-- |
+| 摘要 | SHA256 over `c14n(摘掉 ds:Signature 的 XML)`，enveloped-signature transform |
+| 签名 | RSA-SHA256（`rsa-sha256`）over `c14n(SignedInfo)` |
+| 验签 | 先验签名，再比对 `Reference/DigestValue`，**两关都过才判有效** |
+| 节点 | `<ds:Signature>`，标准命名空间（序列化走 `ds` 前缀） |
+
+切换实现只改一个环境变量，**业务代码零改动**：
+
+```bash
+export OCR_COMPLIANCE_PROVIDER=mock     # 默认，本地即可跑通全部验签
+export OCR_COMPLIANCE_PROVIDER=real     # 接税局真实链路
+```
+
+`RealComplianceProvider` 覆盖 OAuth2 换 token → `/api/invoice/download` 取 XML/OFD/PDF →
+共用 `verify_signature` → 查验结论 24h 缓存 + 状态码映射
+（`1000` 正常 / `1001` 作废 / `1002` 红冲 / `1003` 查无 / `1004` 超限）。
+
+**缺保密凭据时不抛异常、不伪造成功**，而是如实返回原因，例如：
+
+```
+未配置 OCR_TAX_ROOT_CERT（税务根证书公钥）。验签算法与真实实现完全一致，
+仅信任源不同：真实环境用税务根证书公钥，本地测试用自签公钥。
+```
+
+---
+
+## 涉密参数（一律走环境变量，仓库内不落盘）
+
+| 变量 | 含义 |
+| :-- | :-- |
+| `OCR_COMPLIANCE_PROVIDER` | `mock` / `real`，切换合规实现 |
+| `OCR_LEQI_BASE_URL` / `OCR_LEQI_TOKEN` / `OCR_LEQI_CLIENT_SECRET` | 税局侧凭据 |
+| `OCR_TAX_ROOT_CERT` / `OCR_TAX_CERT_SERIAL` | 税务根证书公钥、证书序列号白名单 |
+| `OCR_VERIFY_API_URL` / `OCR_CA_BUNDLE` / `OCR_VERIFY_CACHE` | 查验接口、CA Bundle、缓存文件 |
+| `OCR_LLM_*` | LLM 抽取的模型与凭据 |
+
+真实发票影像、开票方信息、企业凭据**均不包含在本仓库内**；仓库内的演示数据是合成样例。
+
+---
+
+## 演示数据为什么是合成的
+
+`data/synthetic_demo_data.json` 与 `demo_console.html` 里的数据由 `tools/make_demo_data.py` 生成：
+
+- 票面「销售方 / 购买方 / 发票代码」全部是占位值（示例科技有限公司 / 示例采购中心 / `SYNxxxx`）；
+- 预览图由 PIL 现画成占位文档版式，带「合成样例 / SAMPLE」水印，**不是任何真实票据的扫描件**；
+- schema 与真实 ingest 输出完全一致，替换成真实数据只需改数据来源，控制台不需要动。
+
+重新生成：
+
+```bash
+pip install Pillow          # 仅生成预览图需要
+python tools/make_demo_data.py
+python tools/build_console.py <本地demo_console.html> demo_console.html
+```
+
+---
+
+## 已知边界
+
+- **国密 SM2**：税局部分链路用 SM2，需 `gmssl` 一类国密库；`cryptography` 不覆盖，仓库内未实现。
+- **C14N**：标准库 `xml.etree.ElementTree.canonicalize` 只支持 C14N 1.0（inclusive）；
+  若税局下发用 exc-c14n 或 c14n-11，需换 `lxml` 实现。
+- **查验限流**：税务局查验有频次限制，必须走缓存（本仓库 `OCR_VERIFY_CACHE`，TTL 24h）。
+- **复刻版不冒充真实结果**：本仓库不发真实税局请求、不落企业凭据，任何界面也不会把合成数据显示成真实查验结论。
+
+---
+
+## License
+
+MIT —— 见 [LICENSE](./LICENSE)。
