@@ -106,6 +106,39 @@ python src/batch_run.py --input list.txt --extractor hybrid --workers 4 --out ou
 实测（英文商业发票 20 张，`--extractor rule`）：20/20 成功，
 字段准确率 5/6 = 1.0（total 0.95），明细全对 19/20，平均 7.6s/张、约 7.8 张/分钟。
 
+### 批量测试页签（图形界面）
+
+命令行能用之后，同一套参数被搬进了控制台——`demo_console.html` 顶栏切到**「批量测试」**就是工作台。
+
+![批量测试](/docs/batch-shot.svg)
+
+- **左**：数据集下拉、新建任务、历史任务列表（存 localStorage，可重跑）
+- **中·表单**：输入源（可多选 chips）、抽取策略、并发数、`--limit / --offset`、
+  `--truth / --base / --out`、`--resume / --detail`
+- **中·命令卡**：表单改动实时拼出等价命令，一键复制——**表单和 CLI 是同一套参数**，不是另一套演示逻辑
+- **中·预计**：按策略系数 × 数据集 × `Math.pow(workers, 0.55)` 现算耗时与吞吐，方便先估再跑
+- **结果区**：KPI 卡（总量/成功/失败/耗时/吞吐/准确率）、字段准确率六条横条、
+  耗时分布柱状图、当前数据集下 rule / hybrid / llm 三策略对比
+
+| 模式 | 怎么触发 | 结果从哪来 |
+| :- | :- | :- |
+| 实跑（默认探测） | 控制台自动探 `127.0.0.1:8770`，探到就走 SSE 真跑 | `src/batch_run.py` 的 `summary.json` 原样映射回来 |
+| 离线样例（探不到就降级） | 直接开 HTML 点运行 | 按参数推算的沙箱指标，日志末行明说「样例 · 离线沙箱」 |
+
+两种模式在界面右上角用 pill 标注，**不会把样例数字冒充成真实运行结果**。
+
+想真跑，起一个只监听回环的本地后端（可选，`tools/console_server.py`）：
+
+```bash
+python tools/console_server.py            # 默认 8770，仅听 127.0.0.1
+python tools/console_server.py --port 8770 --root .
+```
+
+它做的事很薄：`/api/run` 收到表单参数 → 拼 `src/batch_run.py` 命令行 → `subprocess` 执行 →
+把 stdout 逐行以 SSE `log` 事件推给前端 → 结束推 `done` 带 `summary`。
+安全上 `--out` 被锁在仓库目录内（可用 `--outside` 显式放开），抽取策略与并发数走白名单，
+单任务 30 分钟超时。
+
 ---
 
 ## 目录结构
