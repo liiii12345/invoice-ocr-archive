@@ -31,6 +31,9 @@ Thumbs.db
 batch_out/
 out/
 _pilot/
+_srvtest/
+_s*.log
+_srv*.log
 results*.csv
 summary.json
 failed.txt
