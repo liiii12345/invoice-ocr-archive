@@ -27,6 +27,14 @@ tmp/
 .DS_Store
 Thumbs.db
 
+# 批量测试产物（可能含真实影像与票号，一律不进仓库）
+batch_out/
+out/
+_pilot/
+results*.csv
+summary.json
+failed.txt
+
 # 归档库文件
 *.db
 *.db-journal
