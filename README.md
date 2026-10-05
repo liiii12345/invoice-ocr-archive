@@ -165,7 +165,7 @@ python tools/console_server.py --port 8770 --root .
 │   ├── _runblock.js                  「运行」逻辑源（实跑 SSE / 离线沙箱两条分支）
 │   ├── console_server.py             可选本地后端，只听 127.0.0.1，让页签能真跑 batch_run.py
 │   └── _check_batch_ui.js            页签回归测试（jsdom，30 条断言，`npm i jsdom` 后 `node tools/_check_batch_ui.js`）
-├── docs/                             设计说明、真实性与边界说明、接入指南、调研结论、页签示意图
+├── docs/                             设计说明、真实性与边界说明、接入指南、页签示意图、可优化点清单
 ├── requirements.txt
 └── LICENSE
 ```
