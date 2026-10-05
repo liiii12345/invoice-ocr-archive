@@ -1,0 +1,115 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="920" height="470" viewBox="0 0 920 470">
+  <rect width="920" height="470" fill="#ffffff"/>
+  <rect x="0" y="0" width="920" height="38" fill="#f7f8fa"/>
+  <line x1="0" y1="38" x2="920" y2="38" stroke="#e6e8eb"/>
+  <rect x="24" y="12" width="10" height="14" rx="2" fill="#3b6ef5"/>
+  <text x="42" y="24" font-family="system-ui,-apple-system,Segoe UI,sans-serif" font-size="12" fill="#1f2328">Invoice OCR</text>
+  <rect x="224" y="8" width="150" height="22" rx="11" fill="#eef1f6"/>
+  <circle cx="240" cy="19" r="3.2" fill="#3b6ef5"/>
+  <text x="250" y="23" font-family="system-ui,sans-serif" font-size="11" fill="#3b6ef5">文档档案</text>
+  <circle cx="308" cy="19" r="3.2" fill="#3b6ef5"/>
+  <text x="318" y="23" font-family="system-ui,sans-serif" font-size="11" fill="#3b6ef5">批量测试</text>
+
+  <rect x="24" y="54" width="180" height="392" rx="6" fill="#ffffff" stroke="#e6e8eb"/>
+  <rect x="38" y="68" width="72" height="24" rx="4" fill="#3b6ef5"/>
+  <text x="56" y="84" font-family="system-ui,sans-serif" font-size="11" fill="#ffffff" text-anchor="middle">新建任务</text>
+  <rect x="118" y="68" width="66" height="24" rx="4" fill="#ffffff" stroke="#3b6ef5"/>
+  <text x="151" y="84" font-family="system-ui,sans-serif" font-size="11" fill="#3b6ef5" text-anchor="middle">运行</text>
+  <text x="38" y="116" font-family="system-ui,sans-serif" font-size="11" fill="#656d76">数据集</text>
+  <rect x="38" y="124" width="152" height="24" rx="4" fill="#f7f8fa" stroke="#e6e8eb"/>
+  <text x="46" y="140" font-family="system-ui,sans-serif" font-size="10.5" fill="#1f2328">合成样例 3 张</text>
+  <text x="38" y="172" font-family="system-ui,sans-serif" font-size="11" fill="#656d76">任务</text>
+  <rect x="38" y="182" width="152" height="26" rx="4" fill="#3b6ef5" opacity=".12"/>
+  <text x="46" y="199" font-family="system-ui,sans-serif" font-size="10.5" fill="#1f2328">rule · 3 张 · 已完成</text>
+  <rect x="38" y="214" width="152" height="26" rx="4" fill="#ffffff" stroke="#e6e8eb"/>
+  <text x="46" y="231" font-family="system-ui,sans-serif" font-size="10.5" fill="#656d76">hybrid · 3 张 · 已完成</text>
+  <rect x="38" y="246" width="152" height="26" rx="4" fill="#ffffff" stroke="#e6e8eb"/>
+  <text x="46" y="263" font-family="system-ui,sans-serif" font-size="10.5" fill="#656d76">rule · 20 张 · 采样中</text>
+  <rect x="38" y="278" width="152" height="26" rx="4" fill="#ffffff" stroke="#e6e8eb"/>
+  <text x="46" y="295" font-family="system-ui,sans-serif" font-size="10.5" fill="#656d76">llm · 3 张 · 卡住</text>
+  <rect x="38" y="330" width="152" height="96" rx="6" fill="#f7f8fa" stroke="#e6e8eb"/>
+  <text x="46" y="348" font-family="system-ui,sans-serif" font-size="10.5" fill="#656d76">实跑 · localhost</text>
+  <text x="46" y="366" font-family="system-ui,sans-serif" font-size="10.5" fill="#656d76">workers 2</text>
+  <text x="46" y="384" font-family="system-ui,sans-serif" font-size="10.5" fill="#656d76">rule</text>
+  <text x="46" y="402" font-family="system-ui,sans-serif" font-size="10.5" fill="#656d76">out/_batch</text>
+  <text x="46" y="418" font-family="system-ui,sans-serif" font-size="10.5" fill="#3b6ef5">127.0.0.1:8770</text>
+
+  <rect x="220" y="54" width="676" height="392" rx="6" fill="#ffffff" stroke="#e6e8eb"/>
+  <text x="240" y="80" font-family="system-ui,sans-serif" font-size="12" font-weight="600" fill="#1f2328">批量测试</text>
+  <circle cx="820" cy="76" r="3" fill="#d8b64a"/>
+  <text x="810" y="80" font-family="system-ui,sans-serif" font-size="10" fill="#8a6d1f" text-anchor="end">实跑 · localhost</text>
+
+  <rect x="240" y="94" width="636" height="112" rx="6" fill="#ffffff" stroke="#e6e8eb"/>
+  <text x="254" y="112" font-family="system-ui,sans-serif" font-size="10.5" fill="#656d76">输入源</text>
+  <rect x="254" y="120" width="196" height="24" rx="4" fill="#f7f8fa" stroke="#e6e8eb"/>
+  <text x="264" y="136" font-family="ui-monospace,monospace" font-size="10" fill="#1f2328">data/samples</text>
+  <rect x="458" y="120" width="16" height="24" rx="2" fill="#3b6ef5"/>
+  <text x="482" y="136" font-family="system-ui,sans-serif" font-size="10" fill="#3b6ef5">+ 加一个</text>
+  <rect x="254" y="152" width="80" height="22" rx="11" fill="#eef1f6"/>
+  <text x="294" y="167" font-family="system-ui,sans-serif" font-size="10" fill="#3b6ef5" text-anchor="middle">合成样例</text>
+  <rect x="342" y="152" width="80" height="22" rx="11" fill="#f7f8fa" stroke="#e6e8eb"/>
+  <text x="382" y="167" font-family="system-ui,sans-serif" font-size="10" fill="#656d76" text-anchor="middle">en-20</text>
+  <rect x="430" y="152" width="80" height="22" rx="11" fill="#f7f8fa" stroke="#e6e8eb"/>
+  <text x="470" y="167" font-family="system-ui,sans-serif" font-size="10" fill="#656d76" text-anchor="middle">en-all</text>
+  <rect x="254" y="184" width="110" height="16" rx="3" fill="#f7f8fa"/>
+  <rect x="254" y="184" width="52" height="16" rx="3" fill="#3b6ef5"/>
+  <text x="540" y="169" font-family="system-ui,sans-serif" font-size="10.5" fill="#656d76">抽取策略</text>
+  <rect x="540" y="178" width="106" height="24" rx="4" fill="#f7f8fa" stroke="#3b6ef5"/>
+  <text x="593" y="194" font-family="system-ui,sans-serif" font-size="10" fill="#3b6ef5" text-anchor="middle">rule</text>
+  <rect x="654" y="178" width="30" height="24" rx="4" fill="#ffffff" stroke="#e6e8eb"/>
+  <text x="669" y="194" font-family="system-ui,sans-serif" font-size="10" fill="#1f2328" text-anchor="middle">/</text>
+  <rect x="692" y="178" width="30" height="24" rx="4" fill="#ffffff" stroke="#e6e8eb"/>
+  <text x="707" y="194" font-family="system-ui,sans-serif" font-size="10" fill="#1f2328" text-anchor="middle">/</text>
+  <rect x="730" y="178" width="30" height="24" rx="4" fill="#ffffff" stroke="#e6e8eb"/>
+  <text x="745" y="194" font-family="system-ui,sans-serif" font-size="10" fill="#1f2328" text-anchor="middle">/</text>
+  <text x="540" y="216" font-family="system-ui,sans-serif" font-size="10.5" fill="#656d76">并发</text>
+  <rect x="540" y="224" width="106" height="22" rx="4" fill="#f7f8fa" stroke="#e6e8eb"/>
+  <text x="593" y="239" font-family="system-ui,sans-serif" font-size="10" fill="#1f2328" text-anchor="middle">1</text>
+  <text x="654" y="216" font-family="system-ui,sans-serif" font-size="10.5" fill="#656d76">条数</text>
+  <rect x="654" y="224" width="106" height="22" rx="4" fill="#f7f8fa" stroke="#e6e8eb"/>
+  <text x="707" y="239" font-family="system-ui,sans-serif" font-size="10" fill="#1f2328" text-anchor="middle">20</text>
+
+  <rect x="240" y="214" width="636" height="62" rx="6" fill="#f7f8fa" stroke="#e6e8eb"/>
+  <text x="254" y="232" font-family="system-ui,sans-serif" font-size="10.5" fill="#656d76">等价命令</text>
+  <rect x="756" y="222" width="104" height="22" rx="4" fill="#ffffff" stroke="#e6e8eb"/>
+  <text x="808" y="237" font-family="system-ui,sans-serif" font-size="10" fill="#1f2328" text-anchor="middle">复制</text>
+  <rect x="254" y="240" width="612" height="24" rx="4" fill="#ffffff" stroke="#e6e8eb"/>
+  <text x="262" y="256" font-family="ui-monospace,monospace" font-size="10.5" fill="#3b6ef5">python src/batch_run.py --input data/samples --extractor rule --workers 1 --limit 20 --out out/</text>
+
+  <text x="240" y="300" font-family="system-ui,sans-serif" font-size="10.5" fill="#656d76">预计 154s · 7.8 张/分 · 3/20</text>
+
+  <rect x="240" y="310" width="312" height="112" rx="6" fill="#f7f8fa" stroke="#e6e8eb"/>
+  <text x="254" y="328" font-family="system-ui,sans-serif" font-size="10.5" fill="#656d76">结果</text>
+  <rect x="254" y="336" width="70" height="42" rx="4" fill="#ffffff" stroke="#e6e8eb"/>
+  <text x="289" y="354" font-family="system-ui,sans-serif" font-size="13" font-weight="600" fill="#1f2328" text-anchor="middle">20</text>
+  <text x="289" y="369" font-family="system-ui,sans-serif" font-size="9" fill="#656d76" text-anchor="middle">总量</text>
+  <rect x="330" y="336" width="70" height="42" rx="4" fill="#ffffff" stroke="#e6e8eb"/>
+  <text x="365" y="354" font-family="system-ui,sans-serif" font-size="13" font-weight="600" fill="#1f2328" text-anchor="middle">19</text>
+  <text x="365" y="369" font-family="system-ui,sans-serif" font-size="9" fill="#656d76" text-anchor="middle">成功</text>
+  <rect x="406" y="336" width="70" height="42" rx="4" fill="#ffffff" stroke="#e6e8eb"/>
+  <text x="441" y="354" font-family="system-ui,sans-serif" font-size="13" font-weight="600" fill="#1f2328" text-anchor="middle">1</text>
+  <text x="441" y="369" font-family="system-ui,sans-serif" font-size="9" fill="#656d76" text-anchor="middle">失败</text>
+  <rect x="482" y="336" width="72" height="42" rx="4" fill="#ffffff" stroke="#e6e8eb"/>
+  <text x="518" y="354" font-family="system-ui,sans-serif" font-size="13" font-weight="600" fill="#1f2328" text-anchor="middle">154s</text>
+  <text x="518" y="369" font-family="system-ui,sans-serif" font-size="9" fill="#656d76" text-anchor="middle">耗时</text>
+  <rect x="484" y="386" width="292" height="26" rx="4" fill="#ffffff" stroke="#e6e8eb"/>
+  <rect x="484" y="386" width="278" height="26" rx="4" fill="#3b6ef5" opacity=".16"/>
+  <rect x="762" y="386" width="14" height="26" rx="2" fill="#3b6ef5" opacity=".45"/>
+
+  <rect x="564" y="310" width="312" height="112" rx="6" fill="#f7f8fa" stroke="#e6e8eb"/>
+  <text x="578" y="328" font-family="system-ui,sans-serif" font-size="10.5" fill="#656d76">字段准确率</text>
+  <rect x="578" y="336" width="150" height="7" rx="3.5" fill="#e6e8eb"/>
+  <rect x="578" y="336" width="150" height="7" rx="3.5" fill="#3b6ef5"/>
+  <text x="578" y="360" font-family="ui-monospace,monospace" font-size="9" fill="#656d76">发票号码 1.00</text>
+  <rect x="578" y="366" width="150" height="7" rx="3.5" fill="#e6e8eb"/>
+  <rect x="578" y="366" width="142" height="7" rx="3.5" fill="#3b6ef5" opacity=".8"/>
+  <text x="578" y="390" font-family="ui-monospace,monospace" font-size="9" fill="#656d76">价税合计 0.95</text>
+  <rect x="736" y="336" width="130" height="62" rx="4" fill="#ffffff" stroke="#e6e8eb"/>
+  <rect x="744" y="344" width="14" height="14" rx="2" fill="#3b6ef5"/>
+  <text x="750" y="355" font-family="system-ui,sans-serif" font-size="9" fill="#656d76">rule</text>
+  <rect x="744" y="362" width="14" height="14" rx="2" fill="#3b6ef5" opacity=".45"/>
+  <text x="750" y="373" font-family="system-ui,sans-serif" font-size="9" fill="#656d76">llm</text>
+  <rect x="744" y="380" width="14" height="14" rx="2" fill="#3b6ef5" opacity=".7"/>
+  <text x="750" y="391" font-family="system-ui,sans-serif" font-size="9" fill="#656d76">hybrid</text>
+  <rect x="884" y="336" width="0" height="62" fill="none"/>
+</svg>
