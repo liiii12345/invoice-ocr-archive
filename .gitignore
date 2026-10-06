@@ -35,6 +35,7 @@ _srvtest/
 _s*.log
 _srv*.log
 _t*/
+uploads/                  # 界面上传的发票原件：含真实票号与金额，绝不能进仓库
 results*.csv
 summary.json
 failed.txt
