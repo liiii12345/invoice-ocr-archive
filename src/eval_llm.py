@@ -6,7 +6,14 @@ from rapidocr_onnxruntime import RapidOCR
 from invoice_extract import extract as rule_extract, parse_amount, _norm
 from llm_extract import llm_extract, LLMConfig
 
-BASE = r"D:/BaiduNetdiskDownload/考公资料大全/archive/batch_1"
+# 数据集根目录不写死：各人机器上位置不同，而且这个路径会跟着文件进公开仓库。
+# 用环境变量 OCR_DATASET_ROOT 指定，或用 --base 命令行参数覆盖。
+BASE = os.environ.get("OCR_DATASET_ROOT", "")
+if not BASE:
+    sys.exit("未配置数据集根目录。设环境变量 OCR_DATASET_ROOT=<batch_1 所在目录> 再跑；\n"
+             "例：OCR_DATASET_ROOT=D:/data/archive/batch_1 python %s" % os.path.basename(__file__))
+if not os.path.isdir(BASE):
+    sys.exit("OCR_DATASET_ROOT 指向的目录不存在：%s" % BASE)
 csv.field_size_limit(10 ** 7)
 truth = {}
 for fn in ["batch1_1.csv", "batch1_3.csv"]:
