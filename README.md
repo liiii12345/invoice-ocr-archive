@@ -21,9 +21,19 @@ python src/compliance_provider.py
 pip install -r requirements.txt
 python src/ocr_service.py --host 127.0.0.1 --port 8765
 
-# 3) 打开交互控制台（浏览器直接打开，无需起服务）
-open demo_console.html
+# 3) 起本地后端 —— 想让控制台「真能识别」就靠它（只听 127.0.0.1）
+python tools/console_server.py
+# OCR 依赖装在别的解释器时指定它（不指定也能跑，只是每次多 spawn 一次进程）
+python tools/console_server.py --python ../venv/Scripts/python.exe
+# 想让数据集下拉自动列出本机目录
+python tools/console_server.py --scan D:/你的发票目录
+
+# 4) 打开控制台，顶栏「识别」页把发票拖进去
+open demo_console.html        # 或直接访问 http://127.0.0.1:8770
 ```
+
+> 单文件 HTML 里没有 Python 运行时，OCR 必须在本机跑。
+> 后端没起时控制台仍然能打开，但「识别 / 合规」会明说「需要本地后端」，**不会给你编造识别结果**。
 
 自测输出末尾会打一行 `通过 23 / 23`；其中关键的三条：
 
@@ -61,6 +71,41 @@ open demo_console.html
 ```
 
 
+
+---
+
+## 控制台：四个页签
+
+`demo_console.html` 顶栏四个入口，按「拿到一张发票后你会做什么」的顺序排：
+
+| 页签 | 干什么 | 依赖后端 |
+| :- | :- | :- |
+| **识别** | 拖入/选择单张或多张图片 → 逐张识别 → 看字段、证据放大图、OCR 原文、合规结论 | 是 |
+| **档案** | 已入库文档的检索与详情（概览 / 字段 / OCR / 预览 / 风险印章） | 否 |
+| **批量** | 一整批图片跑批，出汇总表、字段准确率、耗时分布、多任务对比 | 部分（离线为样例） |
+| **合规** | 运行环境体检、XMLDSig 独立验签、票种判定，以及「适不适用」的判断口径 | 是 |
+
+### 识别页怎么用
+
+1. 把发票图片**拖进虚线框**（或点「选择文件」），单张多张都行，非图片会被过滤掉
+2. 选抽取策略：`rule` 快（约 5-8 秒/张）/ `hybrid` 稳 / `llm` 慢但准；勾「跑合规链路」会顺带跑取原件 → 验签 → 查验
+3. 点「开始识别」→ 逐张上传，进度条带 ETA，可随时中止
+4. 结果分三块看：
+   - **左**：原图 + 票种/置信/行数/耗时
+   - **右**：字段表（值 + 置信 + **证据放大图**，就是从原图裁出来放大那一块，用来肉眼核对）+ 明细行 + 合规三卡
+   - **下**：OCR 原文逐行（按版面顺序，带置信度）
+
+多张时左侧文件列表点一下就切到那张；失败的张会直接显示原因，不静默吞掉。
+
+图片只发到本机 `127.0.0.1`，不经过任何外部服务；落盘在 `uploads/`（已在 `.gitignore` 里）。
+
+### 合规页在验什么
+
+不是「一路绿灯」，而是先判断**该不该做**：
+
+- 票种判定给出 `requirements`（要不要 XML、要不要验签、要不要查验）
+- 英文商业发票这类非国内税务票据，三项会如实返回**不适用**，而不是伪造一份「验签通过」
+- Mock 与 Real 共用同一份 XMLDSig 实现（C14N + RSA-SHA256 + 摘要比对），差别只在公钥来源
 
 ---
 
@@ -178,6 +223,7 @@ python tools/console_server.py --python ../venv/Scripts/python.exe       # OCR �
 │   ├── batch_run.py                  ★ 批量测试入口：一整批图片 → results.csv + summary.json
 │   ├── compliance_provider.py        ★ 合规能力：法定原件 / 验签 / 查验，Mock 与 Real 同接口
 │   ├── ocr_service.py                本地服务入口（HTTP + 批处理）
+│   ├── ocr_once.py                   ★ 单张识别入口：图片 → JSON（后端 spawn 用）
 │   ├── invoice_extract.py            规则抽取器（版面坐标推理）
 │   ├── llm_extract.py                LLM 抽取器 + hybrid 融合
 │   ├── vtype_classify.py             票种判定与「适用性」三态
@@ -189,11 +235,18 @@ python tools/console_server.py --python ../venv/Scripts/python.exe       # OCR �
 │   ├── build_console.py              把合成数据注入控制台
 │   ├── build_batch_ui.py             ★ 把批量参数注入控制台，产出「批量测试」页签（幂等，可重复跑）
 │   ├── _runblock.js                  「运行」逻辑源（实跑 SSE / 离线沙箱两条分支）
-│   ├── console_server.py             可选本地后端，只听 127.0.0.1，让页签能真跑 batch_run.py
-│   ├── _check_batch_ui.js            页签回归测试（jsdom，30 条断言）
-│   └── _check_opt.js                 12 条优化的回归测试（jsdom，50 条断言）
+│   ├── console_server.py             ★ 本地后端：上传识别 / 批量 / 数据集扫描 / 合规（只听回环）
+│   ├── build_workspace.py            ★ 注入「识别」「合规」两个视图 + 四段导航（幂等）
+│   ├── _workspace.js                 识别页与合规页的逻辑源
+│   ├── _check_batch_ui.js            批量页签回归测试（jsdom，30 条断言）
+│   ├── _check_opt.js                 12 条优化的回归测试（jsdom，50 条断言）
+│   ├── _check_workspace.js           识别/合规页回归测试（jsdom，32 条断言）
+│   └── _check_upload.js              端到端：jsdom 前端真的向后端上传一张图（10 条）
 │
-│   跑测试：npm i jsdom && node tools/_check_batch_ui.js && node tools/_check_opt.js
+│   跑测试：npm i jsdom
+│           node tools/_check_batch_ui.js && node tools/_check_opt.js
+│           node tools/_check_workspace.js
+│           node tools/_check_upload.js <一张发票图片>   # 需先起后端
 ├── docs/                             设计说明、真实性与边界说明、接入指南、页签示意图、可优化点清单
 ├── requirements.txt
 └── LICENSE
@@ -201,17 +254,20 @@ python tools/console_server.py --python ../venv/Scripts/python.exe       # OCR �
 
 ### 控制台是怎么构建出来的
 
-`demo_console.html` 是**构建产物**，别手改它。源码在 `tools/build_console.py`（文档档案视图）与
-`tools/build_batch_ui.py`（批量测试视图）两个注入器里，都幂等——反复跑只会覆盖自己那一段：
+`demo_console.html` 是**构建产物**，别手改它。三个注入器按顺序跑，每个只改自己那一段，都幂等：
 
 ```bash
-python tools/build_console.py            # 重建基础控制台
-python tools/build_batch_ui.py           # 本地版：带你机器上的数据集预设，跑「实跑」用
-python tools/build_batch_ui.py --public  # 公开版：只留仓库内置合成样例，可推 GitHub
+python tools/build_console.py            # ① 基础控制台（文档档案视图 + 合成演示数据）
+python tools/build_batch_ui.py --public  # ② 批量测试视图 + 顶栏切换
+python tools/build_workspace.py          # ③ 识别 + 合规两个视图，并把导航扩成四个
 ```
 
-本地版会把你自己磁盘上的数据集目录写进预设里（控制台一开就能选），公开版必须走 `--public`
-——否则真实路径会跟着产物一起出仓库。
+顺序不能乱：③ 复用 ② 的 `esc / toast / probeServer / bLlm / bEtaSec`，并接管它的 `switchView`。
+
+注入器一律用 `/*XXX*/ … /*XXX_END*/` 首尾标记做锚点。**替换串只能 `rstrip("\n")` 去掉尾换行，
+不能 `strip()`**——去掉前导换行会让上一段的结尾标记和本段开头粘在同一行，
+每次构建吃掉一个换行，产物 md5 一直漂移；而 `re.sub` 匹配不上时**不报错**，
+得用 `re.subn` 拿返回值 n 判断，否则新代码会被整段静默丢掉。
 
 ---
 
