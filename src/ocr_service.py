@@ -82,11 +82,9 @@ def run_compliance(fields, items, req=None):
 
 sys.stdout.reconfigure(encoding="utf-8")
 
-DATASET_DIRS = [
-    r"D:/BaiduNetdiskDownload/考公资料大全/archive/batch_1/batch1_1",
-    r"D:/BaiduNetdiskDownload/考公资料大全/archive/batch_1/batch1_2",
-    r"D:/BaiduNetdiskDownload/考公资料大全/archive/batch_1/batch1_3",
-]
+# 数据集目录不写死在代码里：一是各人机器上位置不同，二是这个路径会跟着文件进公开仓库。
+# 用环境变量 OCR_DATASET_DIRS 配置（分号分隔，可多个）；没配就是空索引，靠上传或 --input 给图。
+DATASET_DIRS = [d for d in os.environ.get("OCR_DATASET_DIRS", "").split(";") if d.strip()]
 
 _INDEX = {}
 
