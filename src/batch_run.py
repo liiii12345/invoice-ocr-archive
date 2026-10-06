@@ -44,7 +44,10 @@ if HERE not in sys.path:
     sys.path.insert(0, HERE)
 
 try:
-    sys.stdout.reconfigure(encoding="utf-8")
+    # reconfigure() 会把缓冲设置重置回默认的块缓冲，连 `python -u` 的无缓冲都会被吃掉，
+    # 表现为「跑批进度半天不动、一结束全刷出来」，被本进程中止时还会整段丢日志。
+    # 所以重设编码的同时必须显式把行缓冲开回来。
+    sys.stdout.reconfigure(encoding="utf-8", line_buffering=True)
 except Exception:
     pass
 
@@ -249,6 +252,50 @@ def main():
 
     print("[plan] 待跑 %d 张 | extractor=%s | workers=%d" % (len(files), args.extractor, args.workers))
     t_all = time.time()          # 计时必须从「真正开始跑」起算
+
+    # CSV 提前打开：单进程要「跑一张写一张」，全部跑完再落盘的话，
+    # 中途被中止时 results.csv 里一行都没有，--resume 也就无从谈起。
+    header = (["name", "ok", "vtype", "vtype_name", "avg_conf", "line_count", "elapsed",
+               "extractor"] + FIELDS + ["item_count", "error"])
+    fcsv = open(res_csv, "w", encoding="utf-8-sig", newline="")
+    writer = csv.writer(fcsv)
+    writer.writerow(header)
+    fcsv.flush()
+
+    streamed = args.workers <= 1      # 单进程逐张产出；多进程只能等池子结束
+    emitted = []
+
+    def _emit(idx, name, r):
+        """组装一行 → 立刻写盘并 flush → 打进度。中断时已跑完的张不会丢。"""
+        ok = bool(r.get("ok"))
+        if ok:
+            fields = r.get("fields") or {}
+            v = r.get("vtype") or {}
+            vtype_str = v.get("code") or "unknown"
+            vtype_nm = v.get("short") or v.get("name") or ""
+            conf = r.get("avg_conf") or 0.0
+            el = r.get("elapsed") or 0.0
+            row = [name, "True", str(vtype_str), str(vtype_nm), conf,
+                   r.get("line_count", 0), el, args.extractor]
+            for k in FIELDS:
+                val = (fields.get(k) or {}).get("value", "") if isinstance(fields.get(k), dict) else ""
+                row.append(val)
+            items = r.get("items") or []
+            row.append(len(items))
+        else:
+            vtype_str, vtype_nm, conf, el, fields, items = "", "", 0.0, 0.0, {}, []
+            err = r.get("error") or r.get("message") or "unknown"
+            row = [name, "False", "", "", 0, 0, 0, args.extractor] \
+                + [""] * len(FIELDS) + [0, err[:200]]
+        writer.writerow(row)
+        fcsv.flush()
+        print("  [%d/%d] %-32s %s %-10s conf=%s %ss" % (
+            idx, len(files), name[:32], "OK " if ok else "FAIL",
+            str(vtype_str)[:10] if ok else "", round(conf, 3) if ok else "-",
+            row[6] if ok else "-"))
+        sys.stdout.flush()
+        return row
+
     if args.workers > 1:
         import multiprocessing
         ctx = multiprocessing.get_context("spawn")   # Windows 必须 spawn，fork 不安全
@@ -258,7 +305,13 @@ def main():
         pool.close()
         pool.join()
     else:
-        raws = [run_one(p, args.extractor) for p in files]
+        # 单进程必须「跑一张、写一行、打一行」：写成列表推导会先把所有张跑完再统一处理，
+        # 于是界面上的进度条半天不动、ETA 算不出来、中止时连已跑完的张都看不到。
+        raws = []
+        for _i, _p in enumerate(files, 1):
+            _r = run_one(_p, args.extractor)
+            raws.append(_r)
+            emitted.append(_emit(_i, os.path.basename(_p), _r))
 
     # ---------------------------------------------------------- 汇总
     rows, hit = [], {k: 0 for k in FIELDS}
@@ -267,13 +320,7 @@ def main():
     field_cnt = {k: 0 for k in FIELDS}          # 有值的张数（用于「非空率」）
     failures, details = [], []
 
-    header = (["name", "ok", "vtype", "vtype_name", "avg_conf", "line_count", "elapsed",
-               "extractor"] + FIELDS + ["item_count", "error"])
-    fcsv = open(res_csv, "w", encoding="utf-8-sig", newline="")
-    writer = csv.writer(fcsv)
-    writer.writerow(header)
-
-    for path, r in zip(files, raws):
+    for idx, (path, r) in enumerate(zip(files, raws), 1):
         name = os.path.basename(path)
         ok = bool(r.get("ok"))
         if ok:
@@ -281,20 +328,15 @@ def main():
             fields = r.get("fields") or {}
             v = r.get("vtype") or {}
             vtype_str = v.get("code") or "unknown"
-            vtype_nm = v.get("short") or v.get("name") or ""
             vtype_cnt[str(vtype_str)] += 1
             conf = r.get("avg_conf") or 0.0
             el = r.get("elapsed") or 0.0
             elapses.append(el)
-            row = [name, "True", str(vtype_str), str(vtype_nm), conf,
-                   r.get("line_count", 0), el, args.extractor]
             for k in FIELDS:
                 val = (fields.get(k) or {}).get("value", "") if isinstance(fields.get(k), dict) else ""
-                row.append(val)
                 if str(val).strip():
                     field_cnt[k] += 1
             items = r.get("items") or []
-            row.append(len(items))
             if args.detail:
                 details.append({"name": name, **r})
         else:
@@ -302,16 +344,10 @@ def main():
             err = r.get("error") or r.get("message") or "unknown"
             failures.append("%s | %s" % (name, err))
             vtype_cnt["<失败>"] += 1
-            row = [name, "False", "", "", 0, 0, 0, args.extractor] \
-                + [""] * len(FIELDS) + [0, err[:200]]
+            conf, el, items = 0.0, 0.0, []
 
-        writer.writerow(row)
-        fcsv.flush()          # 边跑边落盘，中断也不丢已跑结果
-        print("  [%d/%d] %-32s %s %-10s conf=%s %ss" % (
-            len(rows) + 1, len(files), name[:32], "OK " if ok else "FAIL",
-            str(vtype_str)[:10] if ok else "", round(conf, 3) if ok else "-",
-            row[6] if ok else "-"))
-        rows.append(row)
+        # 单进程在跑的过程中已经逐张写过；多进程只能等池子结束，在这里补写。
+        rows.append(emitted[idx - 1] if streamed else _emit(idx, name, r))
 
         # 准确率（有真值时）
         if ok and name in truth:
