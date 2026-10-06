@@ -21,7 +21,7 @@
   · 单任务超时 1800s
   · LLM Key 只在请求里以环境变量注入子进程，**不写任何文件、不进日志**
 """
-import os, sys, json, argparse, subprocess, time, urllib.parse, csv as _csv
+import os, sys, json, argparse, subprocess, time, urllib.parse, csv as _csv, re as _re
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
@@ -32,8 +32,25 @@ ALLOW_OUTSIDE = False
 MAX_ROWS = 2000          # /api/results 最多返回多少行
 SCAN_MAX_DEPTH = 3       # 数据集扫描最深几层
 SCAN_MAX_ITEMS = 60      # 数据集下拉最多列多少条
+MAX_UPLOAD_MB = 30       # 单文件上限
+UPLOAD_DIR = os.path.join(ROOT, "uploads")
 
 IMG_EXT = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tif", ".tiff"}
+UPLOAD_EXT = IMG_EXT | {".pdf"}
+
+
+def _has_ocr():
+    """当前解释器是否装齐 OCR 依赖；没有就得 spawn 到 --python 指向的解释器。"""
+    try:
+        import importlib
+        for m in ("numpy", "PIL", "rapidocr_onnxruntime"):
+            importlib.import_module(m)
+        return True
+    except Exception:  # noqa
+        return False
+
+
+HAS_OCR = _has_ocr()
 
 # 仓库内置样例（公开仓库里不落任何本机路径；本机数据集靠 --scan 或 OCR_SCAN_ROOTS 探测）
 BUILTIN_DATASETS = [
@@ -143,6 +160,118 @@ def read_results(out):
     except Exception as e:  # noqa
         return None, repr(e)
     return rows[:MAX_ROWS], None
+
+
+def parse_multipart(body, boundary):
+    """极简 multipart/form-data 解析：只取普通字段与文件。
+
+    Python 3.13 已经没有 cgi 模块了，为这一个接口引入第三方又太重，
+    就按 boundary 切段自己解——上传只走本机回环，够用且可控。
+    """
+    out = {}
+    delim = b"--" + boundary.encode("utf-8")
+    for part in body.split(delim):
+        part = part.strip(b"\r\n")
+        if not part or part == b"--":
+            continue
+        if b"\r\n\r\n" not in part:
+            continue
+        head, data = part.split(b"\r\n\r\n", 1)
+        head = head.decode("utf-8", "ignore")
+        m = _re.search(r'name="([^"]*)"', head)
+        if not m:
+            continue
+        name = m.group(1)
+        fm = _re.search(r'filename="([^"]*)"', head)
+        if fm:
+            out[name] = {"filename": fm.group(1), "data": data}
+        else:
+            out[name] = data.decode("utf-8", "ignore")
+    return out
+
+
+def _llm_env(api_key=None, base_url=None, model=None):
+    env = os.environ.copy()
+    if api_key:
+        env["OCR_LLM_API_KEY"] = api_key
+        env["DASHSCOPE_API_KEY"] = api_key
+    if base_url:
+        env["OCR_LLM_BASE_URL"] = base_url
+    if model:
+        env["OCR_LLM_MODEL"] = model
+    return env
+
+
+def run_ocr_file(path, extractor="rule", with_compliance=False,
+                 api_key=None, base_url=None, model=None):
+    """识别一张图。有 OCR 依赖就进程内跑，没有就 spawn 到 --python 的解释器。"""
+    if HAS_OCR:
+        import io as _io, contextlib
+        if os.path.join(ROOT, "src") not in sys.path:
+            sys.path.insert(0, os.path.join(ROOT, "src"))
+        from ocr_service import run_ocr, run_compliance
+        noise = _io.StringIO()
+        try:
+            with contextlib.redirect_stdout(noise):
+                r = run_ocr(path, extractor)
+                if with_compliance and isinstance(r, dict) and r.get("ok"):
+                    req = (r.get("vtype") or {}).get("requirements")
+                    r["compliance"] = run_compliance(
+                        r.get("fields") or {}, r.get("items") or [], req)
+        except Exception as e:  # noqa
+            return {"ok": False, "error": "%s: %s" % (type(e).__name__, e)}
+        r["_stdout"] = noise.getvalue()[-2000:]
+        return r
+
+    cmd = [PYTHON, "-u", os.path.join("src", "ocr_once.py"),
+           "--file", path, "--extractor", extractor]
+    if with_compliance:
+        cmd += ["--compliance", "1"]
+    try:
+        p = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True,
+                           env=_llm_env(api_key, base_url, model),
+                           encoding="utf-8", errors="replace", timeout=600,
+                           creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    except Exception as e:  # noqa
+        return {"ok": False, "error": repr(e)}
+    if p.returncode != 0:
+        return {"ok": False, "error": "exit %d" % p.returncode,
+                "stderr": (p.stderr or "")[-1200:]}
+    try:
+        return json.loads(p.stdout)
+    except Exception:  # noqa
+        return {"ok": False, "error": "返回不是 JSON", "stderr": (p.stderr or "")[-1200:],
+                "stdout_head": (p.stdout or "")[:400]}
+
+
+def provider_info():
+    return {
+        "provider": os.environ.get("OCR_COMPLIANCE_PROVIDER", "mock"),
+        "python": PYTHON,
+        "has_ocr": HAS_OCR,
+        "spawn": not HAS_OCR,
+        "llm_ready": bool(os.environ.get("OCR_LLM_API_KEY")
+                          or os.environ.get("DASHSCOPE_API_KEY")
+                          or os.environ.get("OPENAI_API_KEY")),
+        "llm_model": os.environ.get("OCR_LLM_MODEL") or "qwen-flash",
+        "llm_base_url": os.environ.get("OCR_LLM_BASE_URL") or "",
+        "scan_roots": SCAN_ROOTS,
+    }
+
+
+def capabilities():
+    """告诉前端「哪些能力现在真能用」——不能用的就别在界面上装作能用。"""
+    pi = provider_info()
+    return {"ok": True, "server": True, **pi, "abilities": {
+        "ocr": True,                                   # 有后端就能识别（可能走 spawn）
+        "ocr_inprocess": pi["has_ocr"],
+        "vtype": True,
+        "batch": True,
+        "extract_llm": pi["llm_ready"],
+        "compliance_xml": pi["provider"] != "",
+        "compliance_sign": True,                       # Mock 模式下用的是真 XMLDSig 验签
+        "compliance_verify": True,
+    }}
 
 
 def run_batch(qs, send_event, task_id=""):
@@ -266,6 +395,12 @@ class Handler(BaseHTTPRequestHandler):
             return self._body(200, {"ok": True, "root": ROOT, "py": PYTHON,
                                     "scan_roots": SCAN_ROOTS})
 
+        if path == "/api/provider":
+            return self._body(200, {"ok": True, **provider_info()})
+
+        if path == "/api/capabilities":
+            return self._body(200, capabilities())
+
         if path == "/api/datasets":
             return self._body(200, {"ok": True,
                                     "datasets": all_datasets(force=bool(qs.get("refresh")))})
@@ -352,6 +487,100 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(data)
             return
+
+        return self._body(404, {"ok": False, "message": "not found"})
+
+    # ── POST：上传识别 / 票种判定 / 独立验签 ──
+    def do_POST(self):
+        u = urllib.parse.urlparse(self.path)
+        path = u.path
+        try:
+            n = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            n = 0
+        if n <= 0:
+            return self._body(400, {"ok": False, "message": "空请求体"})
+        if n > (MAX_UPLOAD_MB + 8) * 1024 * 1024:
+            return self._body(413, {"ok": False, "message": "超过 %d MB" % MAX_UPLOAD_MB})
+        body = self.rfile.read(n)
+
+        ctype = self.headers.get("Content-Type") or ""
+
+        # ── 上传识别 ──
+        if path == "/api/ocr":
+            m = _re.search(r"boundary=(?:\"([^\"]+)\"|([^;]+))", ctype)
+            if not m:
+                return self._body(400, {"ok": False, "message": "需要 multipart/form-data"})
+            boundary = (m.group(1) or m.group(2) or "").strip()
+            fields = parse_multipart(body, boundary)
+            f = fields.get("file")
+            if not isinstance(f, dict) or not f.get("data"):
+                return self._body(400, {"ok": False, "message": "缺少 file"})
+            extractor = str(fields.get("extractor") or "rule")
+            if extractor not in ("rule", "llm", "hybrid"):
+                extractor = "rule"
+            with_compliance = str(fields.get("compliance") or "0") in ("1", "true", "on")
+
+            orig = os.path.basename(f.get("filename") or "upload")
+            ext = os.path.splitext(orig)[1].lower()
+            if ext not in UPLOAD_EXT:
+                return self._body(400, {"ok": False,
+                                        "message": "不支持的格式 %s（支持 %s）"
+                                                   % (ext, "/".join(sorted(UPLOAD_EXT)))})
+            if len(f["data"]) > MAX_UPLOAD_MB * 1024 * 1024:
+                return self._body(413, {"ok": False, "message": "文件超过 %d MB" % MAX_UPLOAD_MB})
+
+            # 落盘名去干净：只留扩展名，避免路径穿越和中文名踩坑
+            os.makedirs(UPLOAD_DIR, exist_ok=True)
+            safe = "u%s%s" % (int(time.time() * 1000), ext)
+            fp = os.path.join(UPLOAD_DIR, safe)
+            with open(fp, "wb") as fh:
+                fh.write(f["data"])
+
+            t0 = time.time()
+            r = run_ocr_file(fp, extractor, with_compliance,
+                             fields.get("apiKey"), fields.get("baseUrl"), fields.get("model"))
+            if isinstance(r, dict):
+                r["_file"] = {"name": orig, "saved": safe, "bytes": len(f["data"])}
+                r["_server_elapsed"] = round(time.time() - t0, 2)
+            return self._body(200, r if isinstance(r, dict)
+                              else {"ok": False, "error": str(r)})
+
+        # ── 票种判定（不给图，只给文本）──
+        if path == "/api/vtype":
+            try:
+                j = json.loads(body.decode("utf-8", "ignore"))
+            except Exception:  # noqa
+                return self._body(400, {"ok": False, "message": "body 不是 JSON"})
+            text = str(j.get("text") or "")
+            if not text.strip():
+                return self._body(400, {"ok": False, "message": "text 为空"})
+            try:
+                if os.path.join(ROOT, "src") not in sys.path:
+                    sys.path.insert(0, os.path.join(ROOT, "src"))
+                from vtype_classify import classify
+                return self._body(200, {"ok": True, "vtype": classify(text)})
+            except Exception as e:  # noqa
+                return self._body(500, {"ok": False, "message": "%s: %s" % (type(e).__name__, e)})
+
+        # ── 独立验签：直接粘一段 XML 进来 ──
+        if path == "/api/verify_xml":
+            try:
+                j = json.loads(body.decode("utf-8", "ignore"))
+            except Exception:  # noqa
+                return self._body(400, {"ok": False, "message": "body 不是 JSON"})
+            xml = str(j.get("xml") or "")
+            if not xml.strip():
+                return self._body(400, {"ok": False, "message": "xml 为空"})
+            try:
+                if os.path.join(ROOT, "src") not in sys.path:
+                    sys.path.insert(0, os.path.join(ROOT, "src"))
+                from compliance_provider import get_provider
+                p = get_provider()
+                res = p.verify_signature(xml, j.get("req"))
+                return self._body(200, {"ok": True, "provider": p.name, **res.to_dict()})
+            except Exception as e:  # noqa
+                return self._body(500, {"ok": False, "message": "%s: %s" % (type(e).__name__, e)})
 
         return self._body(404, {"ok": False, "message": "not found"})
 
