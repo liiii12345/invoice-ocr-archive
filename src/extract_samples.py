@@ -5,7 +5,14 @@ from collections import defaultdict, Counter
 from PIL import Image
 
 csv.field_size_limit(10 ** 7)
-BASE = r"D:/BaiduNetdiskDownload/考公资料大全/archive/batch_1"
+# 数据集根目录不写死：各人机器上位置不同，而且这个路径会跟着文件进公开仓库。
+# 用环境变量 OCR_DATASET_ROOT 指定，或用 --base 命令行参数覆盖。
+BASE = os.environ.get("OCR_DATASET_ROOT", "")
+if not BASE:
+    sys.exit("未配置数据集根目录。设环境变量 OCR_DATASET_ROOT=<batch_1 所在目录> 再跑；\n"
+             "例：OCR_DATASET_ROOT=D:/data/archive/batch_1 python %s" % os.path.basename(__file__))
+if not os.path.isdir(BASE):
+    sys.exit("OCR_DATASET_ROOT 指向的目录不存在：%s" % BASE)
 OUT = os.path.dirname(os.path.abspath(__file__))
 
 def num(x):
