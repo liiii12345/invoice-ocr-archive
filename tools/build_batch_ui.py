@@ -5,15 +5,22 @@ import os, sys, re, json
 HERE = os.path.dirname(os.path.abspath(__file__))
 TARGET = os.path.join(HERE, "..", "demo_console.html")
 MARK_CSS = "/*BATCH_CSS*/"
-RUNBLOCK = __import__("io").open(
-    os.path.join(os.path.dirname(os.path.abspath(__file__)), "_runblock.js"),
-    encoding="utf-8").read()
+
+
+def _read(fn):
+    with __import__("io").open(os.path.join(HERE, fn), encoding="utf-8") as f:
+        return f.read()
+
+
+RUNBLOCK = _read("_runblock.js")   # 运行逻辑（实跑 SSE / 离线沙箱）
+OPTBLOCK = _read("_optblock.js")   # 12 条优化（探测 / Key / 对比 / 续跑 / 明细 / 导出 / 复核 / 中止）
 MARK_JS = "/*BATCH_JS*/"
 MARK_DOM = "<!--BATCH_DOM-->"
 
 
 # ─────────────────────────────────────────────── CSS
 CSS = r"""
+/*BATCH_CSS*/
   /* ── segmented (doc / batch) ── */
   .seg{display:flex;background:var(--hover);border:1px solid var(--line);border-radius:7px;padding:2px;gap:2px}
   .seg button{border:none;background:transparent;height:26px;padding:0 13px;border-radius:5px;font-size:12.5px;color:var(--ink-2);cursor:pointer;font-family:var(--sans)}
@@ -80,6 +87,43 @@ CSS = r"""
   .prog{height:6px;background:var(--line);border-radius:4px;overflow:hidden}
   .prog i{display:block;height:100%;background:var(--accent);width:0;transition:width .3s}
   .tagline{font-size:11.5px;color:var(--ink-3);display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+
+  /* ── 12 条优化新增 ── */
+  .logbox .fm{color:#c9a7f5}   /* [field] / [out] / env 提示 */
+  .logbox .pl{color:#9fb4d0}   /* [plan] */
+  .etaline{font-size:11.5px;color:var(--ink-3);margin:8px 0 10px;min-height:16px}
+  /* 三段式：新增 / 重跑 / 失败 */
+  .segbar{display:flex;height:9px;border-radius:5px;overflow:hidden;background:var(--line)}
+  .segbar i{display:block;height:100%}
+  .segbar .a{background:#3b6ef5} .segbar .r{background:#8ab4f8} .segbar .f{background:#e0574f}
+  .segkey{display:flex;gap:16px;flex-wrap:wrap;margin-top:9px;font-size:11.5px;color:var(--ink-2)}
+  .segkey span{display:flex;align-items:center;gap:6px}
+  .segkey i{width:9px;height:9px;border-radius:2px;display:inline-block}
+  .segkey .muted{color:var(--ink-3)}
+  /* 明细 / 对比 / 字段对照表 */
+  .dtwrap{max-height:420px;overflow:auto;border:1px solid var(--line-2);border-radius:8px}
+  table.dt.diff td,table.dt.rows td,table.dt.cmp td{white-space:nowrap}
+  table.dt td.dbad{background:#fff5e6;color:#8a5a00}
+  table.dt .mk{white-space:nowrap;width:74px}
+  .mkbtn{border:1px solid var(--line);background:var(--panel);color:var(--ink-3);width:26px;height:24px;
+    border-radius:5px;cursor:pointer;font-size:12px;margin-right:4px;line-height:1}
+  .mkbtn.on{background:var(--accent);border-color:var(--accent);color:#fff}
+  .mkbtn[data-m="bad"].on{background:#e0574f;border-color:#e0574f}
+  button.lnk{border:none;background:none;color:var(--accent);cursor:pointer;font-size:12px;padding:0}
+  button.lnk:hover{text-decoration:underline}
+  /* 侧栏任务勾选 */
+  #bTaskList .item{padding-left:14px}
+  .cmpbox{margin:3px 8px 0 0;flex:0 0 auto;align-self:flex-start}
+  #bTaskList .item.active .cmpbox{margin-top:3px}
+  .rescan{padding:10px 16px 0}
+  /* 明细 / 对照两个小页签 */
+  .tabs2{display:flex;gap:6px;margin-bottom:12px}
+  .tabs2 button{border:1px solid var(--line);background:var(--panel);color:var(--ink-2);
+    height:27px;padding:0 12px;border-radius:6px;font-size:12px;cursor:pointer;font-family:var(--sans)}
+  .tabs2 button.on{background:var(--accent);border-color:var(--accent);color:#fff}
+  /* 数据集下拉分组 */
+  #bDs optgroup{color:var(--ink-3);font-style:normal;font-size:11.5px}
+/*BATCH_CSS_END*/
 """
 
 # ─────────────────────────────────────────────── DOM
@@ -406,13 +450,20 @@ function bRenderBody(){
           ${esc(cur.name)} · ${esc(cur.extractor)} · ${m.total} 张 · ${cur.elapsed}s</div></div>
         <div class="acts"><button class="btn" id="bNew2">新建</button>
           <button class="btn" id="bCopy2">复制命令</button>
-          <button class="btn" id="bCsv">导出 CSV</button></div></div>
+          <button class="btn" id="bCsv">导出 CSV</button>
+          <button class="btn" id="bMd">导出 Markdown</button>
+          <button class="btn" id="bJs">导出 JSON</button>
+          <button class="btn" id="bCmp">对比所选</button></div></div>
       <div id="bMid">${bRenderForm()}</div>
-      <div id="bRes">${bResult(m,cur.kind)}</div>`;
+      <div id="bRes">${bResult(m,cur.kind)}</div>
+      <div id="bExt"></div>`;
     bBindForm(); bRenderCmd();
     $("#bNew2").onclick=bNewTask;
     $("#bCopy2").onclick=()=>{copy(bCmd());};
     $("#bCsv").onclick=()=>bCsv(cur);
+    $("#bMd").onclick=()=>bReport("md");
+    $("#bJs").onclick=()=>bReport("json");
+    $("#bCmp").onclick=()=>{ BState.cmpOpen=true; bEnhance(); };
   } else {
     body.innerHTML = `
       <div class="bp-head"><div><div class="t">批量测试</div>
@@ -447,6 +498,7 @@ async function probeServer(){
   catch(e){ return false; }
 }
 __RUNBLOCK__
+__OPTBLOCK__
 
 /* ── 顶栏切换 ── */
 function switchView(v){
@@ -468,6 +520,7 @@ document.querySelectorAll(".seg button").forEach(b=>b.onclick=()=>switchView(b.d
   BState.truth=p.truth||"";
   if(p.default_truth!==undefined) BState.truth=p.default_truth;
 })();
+/*BATCH_JS_END*/
 """
 
 
@@ -478,12 +531,17 @@ def build(presets, live):
     js = (JS
           .replace("__PRESETS__", presets)
           .replace("__LIVE__", "true" if live else "false")
-          .replace("__RUNBLOCK__", RUNBLOCK))
+          .replace("__RUNBLOCK__", RUNBLOCK)
+          .replace("__OPTBLOCK__", OPTBLOCK))
 
-    # ── CSS（幂等替换）──
+    # ── CSS（幂等替换）
+    # 同样用首尾标记做锚点；少了标记就会退化成每次在 </style> 前追加一份，文件越跑越大。
     if MARK_CSS in html:
-        html = re.sub(r"\n  /\* ── batch workbench ──[\s\S]*?\n  \.tagline\{[^}]*\}\n",
-                      lambda m: "\n" + CSS, html, count=1)
+        html, n = re.subn(r"\n/\*BATCH_CSS\*/[\s\S]*?\n/\*BATCH_CSS_END\*/",
+                          lambda m: CSS.rstrip("\n"), html, count=1)
+        if not n:
+            html, n = re.subn(r"\n/\*BATCH_CSS\*/[\s\S]*?(?=\n</style>)",
+                              lambda m: CSS.rstrip("\n"), html, count=1)
     else:
         html = html.replace("</style>", CSS + "\n</style>", 1)
 
@@ -494,7 +552,7 @@ def build(presets, live):
     # ── DOM ──
     if MARK_DOM in html:
         html = re.sub(r"\n<!--BATCH_DOM-->\n<div class=\"shell hidden\" id=\"shellBatch\">[\s\S]*?\n</div>\n",
-                      lambda m: DOM.rstrip("\n"), html, count=1)
+                      lambda m: DOM, html, count=1)
     else:
         html = html.replace("<!-- reference drawer -->", DOM + "\n<!-- reference drawer -->", 1)
 
@@ -507,9 +565,17 @@ def build(presets, live):
                             '<span class="envtag" id="envtag">', 1)
 
     # ── JS（幂等替换）──
+    # 首选锚点：显式结束标记 /*BATCH_JS_END*/。
+    # 回退锚点：老产物里没有这个标记，退而求其次吃到 </script> 之前——
+    # 少了这层回退，re.sub 会静默不匹配、把新 JS 整段丢掉。
     if MARK_JS in html:
-        html = re.sub(r"\n/\*BATCH_JS\*/[\s\S]*?\naddEventListener\(\"load\", \(\)=>\{[\s\S]*?\n\}\);\n",
-                      lambda m: "\n" + js, html, count=1)
+        html, n = re.subn(r"\n/\*BATCH_JS\*/[\s\S]*?\n/\*BATCH_JS_END\*/\n",
+                          lambda m: js, html, count=1)
+        if not n:
+            html, n = re.subn(r"\n/\*BATCH_JS\*/[\s\S]*?(?=\n</script>)",
+                              lambda m: js.rstrip("\n"), html, count=1)
+        if not n:
+            html = html.replace("</script>", js + "\n</script>", 1)
     else:
         html = html.replace("</script>", js + "\n</script>", 1)
 
@@ -534,27 +600,15 @@ if __name__ == "__main__":
         "default_truth": ""
     }], ensure_ascii=False)
 
-    local_presets = json.dumps([
-        {
-            "id": "sample", "label": "合成样例 3 张（仓库内置）", "short": "sample",
-            "files": 3, "sample": "synth", "success": 1.0, "accScale": 1.0, "costScale": 1.0,
-            "vtypes": [["发票票样（合成）", 3]],
-            "default_src": "data/samples", "default_truth": ""
-        },
-        {
-            "id": "en20", "label": "英文商业发票 20 张（含真值）", "short": "en20",
-            "files": 20, "sample": "inv", "success": 1.0, "accScale": 1.0, "costScale": 1.0,
-            "vtypes": [["商业发票", 18], ["估算单", 2]],
-            "default_src": "D:/BaiduNetdiskDownload/考公资料大全/archive/batch_1/batch1_1/*.jpg",
-            "default_truth": "D:/BaiduNetdiskDownload/考公资料大全/archive/batch_1/batch1_1.csv"
-        },
-        {
-            "id": "en1489", "label": "英文商业发票 1489 张（全量）", "short": "en_all",
-            "files": 1489, "sample": "inv", "success": .985, "accScale": .985, "costScale": .8,
-            "vtypes": [["商业发票", 1302], ["估算单", 118], ["运输单", 69]],
-            "default_src": "D:/BaiduNetdiskDownload/考公资料大全/archive/batch_1", "default_truth": ""
-        }
-    ], ensure_ascii=False)
+    # 本地版默认也只放仓库内置样例：本机数据集一律靠 console_server 的 --scan 在运行时探测，
+    # 不再把本机盘符路径写进构建脚本——否则脚本一进仓库，家里目录结构就跟着公开了。
+    # 真要在构建时固定几组，用 OCR_DATASETS_JSON 指向自己的 JSON 文件（该文件不进仓库）。
+    _extra = os.environ.get("OCR_DATASETS_JSON", "")
+    if _extra and os.path.isfile(_extra):
+        with open(_extra, encoding="utf-8") as _f:
+            local_presets = json.dumps(json.load(_f), ensure_ascii=False)
+    else:
+        local_presets = public_presets
 
     # 本地版控制台
     with open(os.path.abspath(TARGET), encoding="utf-8") as f:
