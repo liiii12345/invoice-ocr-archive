@@ -130,14 +130,40 @@ python src/batch_run.py --input list.txt --extractor hybrid --workers 4 --out ou
 想真跑，起一个只监听回环的本地后端（可选，`tools/console_server.py`）：
 
 ```bash
-python tools/console_server.py            # 默认 8770，仅听 127.0.0.1
-python tools/console_server.py --port 8770 --root .
+python tools/console_server.py
+python tools/console_server.py --scan D:/data/invoices --scan E:/more   # 数据集下拉自动列出本机目录
+python tools/console_server.py --python ../venv/Scripts/python.exe       # OCR 依赖装在别的解释器时
 ```
 
 它做的事很薄：`/api/run` 收到表单参数 → 拼 `src/batch_run.py` 命令行 → `subprocess` 执行 →
 把 stdout 逐行以 SSE `log` 事件推给前端 → 结束推 `done` 带 `summary`。
 安全上 `--out` 被锁在仓库目录内（可用 `--outside` 显式放开），抽取策略与并发数走白名单，
-单任务 30 分钟超时。
+单任务 30 分钟超时；LLM Key 只在请求里以环境变量注入子进程，**不写文件、不进日志、不回显**。
+
+#### 页签上另外 12 件事
+
+| # | 功能 | 落在哪 |
+| :- | :- | :- |
+| 1 | **真实数据集自动探测** | `--scan` 的目录会被扫出来（含同名真值 csv 自动配对），下拉里另起一组「本机扫描」 |
+| 2 | **LLM Key 配置面板** | 选 llm/hybrid 才展开；Key 存 localStorage、只随本次运行注入环境变量，不明文回显 |
+| 3 | **多任务对比** | 侧栏勾选 ≥2 个任务 → 出对比表，并直接说「谁最快 / 谁最准」 |
+| 4 | **断点续跑可视化** | 跑之前先读一次 `results.csv`，跑完按「新增 / 重跑 / 失败」三段统计 |
+| 5 | 三段式进度条 | 同上，落在结果区顶部的「断点续跑」卡 |
+| 6 | **批量结果跳档案视图** | 明细行点「档案视图 ›」→ 映射成一条文档记录并选中，不用一张张点 |
+| 7 | **字段横向差异对照** | 行=文件、列=六字段，缺失/非数值/日期格式可疑的格子标橙，附每列异常数 |
+| 8 | 日志分色 | `$` / `[plan]` / `[field]` / `[overview]` / `[warn]` / `FAIL` / `[error]` 各一色，失败项可点 |
+| 9 | 进度 ETA | 按已完成的平均用时外推「预计剩余 X 分 Y 秒」 |
+| 10 | 导出 Markdown / JSON | 报告里带参数、命令、指标与抽样复核结论，可直接贴周报 |
+| 11 | 抽样复核标记 | 明细行 ✓/✗ 打标，统计「已复核 n 张 · 判错 k · 错误率 x%」，导出时带上 |
+| 12 | 运行中止 | 关 SSE + 调 `/api/stop`；已跑完的张已落盘，下次 `--resume` 会跳过 |
+
+底层为此改了两处，否则上面几条是假的：
+
+- `src/batch_run.py` 单进程路径原来写成列表推导（`raws = [run_one(p) for p in files]`），
+  等于**先把所有张跑完再统一打印和写 CSV**——进度条不动、ETA 没意义、中止时一行都不剩。
+  现在改成跑一张就 `_emit()` 一张（写盘 + flush + 打进度）。
+- `sys.stdout.reconfigure(encoding="utf-8")` 会把缓冲重置回块缓冲，连 `python -u` 都被吃掉，
+  所以重设编码时显式带上了 `line_buffering=True`。
 
 ---
 
@@ -164,7 +190,10 @@ python tools/console_server.py --port 8770 --root .
 │   ├── build_batch_ui.py             ★ 把批量参数注入控制台，产出「批量测试」页签（幂等，可重复跑）
 │   ├── _runblock.js                  「运行」逻辑源（实跑 SSE / 离线沙箱两条分支）
 │   ├── console_server.py             可选本地后端，只听 127.0.0.1，让页签能真跑 batch_run.py
-│   └── _check_batch_ui.js            页签回归测试（jsdom，30 条断言，`npm i jsdom` 后 `node tools/_check_batch_ui.js`）
+│   ├── _check_batch_ui.js            页签回归测试（jsdom，30 条断言）
+│   └── _check_opt.js                 12 条优化的回归测试（jsdom，50 条断言）
+│
+│   跑测试：npm i jsdom && node tools/_check_batch_ui.js && node tools/_check_opt.js
 ├── docs/                             设计说明、真实性与边界说明、接入指南、页签示意图、可优化点清单
 ├── requirements.txt
 └── LICENSE
