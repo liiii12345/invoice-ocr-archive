@@ -347,8 +347,9 @@
 
 <div class="shell" id="shellDoc">
   <aside class="side">
-    <div class="side-h"><span class="t">文档</span><span class="c" id="cnt">0</span></div>
+    <div class="side-h"><span class="t">发票档案</span><span class="c" id="cnt">0</span></div>
     <div class="filters">
+      <div id="arcSrc" class="pill" style="align-self:flex-start">数据来源检测中…</div>
       <div class="row">
         <select id="ftype"><option value="">全部类型</option></select>
       </div>
@@ -383,6 +384,15 @@
       <div>
         <div class="lbl">数据集</div>
         <select id="bDs"><option value="">—</option></select>
+        <div style="margin-top:7px;font-size:11px;line-height:1.55;color:var(--ink-3)">
+          <strong style="color:var(--ink-2)">数据来源</strong>＝本机<strong>文件夹</strong>数据集（后端
+          <span style="font-family:var(--mono)">--scan</span> 扫描得到），
+          <strong>不是</strong>浏览器拖拽上传。<br>
+          跑自己的发票：把图片放进一个文件夹 → 用
+          <span style="font-family:var(--mono)">--scan &lt;文件夹&gt;</span> 启动后端 →
+          点下方「重新扫描本机数据集」。<br>
+          后端未启动时只剩内置样例，页面指标为<strong>推算值</strong>，非真实跑批结果。
+        </div>
       </div>
     </div>
     <div class="list" id="bTaskList"></div>
@@ -449,18 +459,30 @@ const esc = s=>String(s??"").replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&
 const num = v=>{const n=parseFloat(String(v).replace(/[^0-9.\-]/g,""));return isNaN(n)?null:n;};
 function confBar(c){c=Number(c)||0;const p=Math.round(c*100);return `<span class="conf"><span class="bar"><i style="width:${p}%"></i></span>${p}%</span>`;}
 
-/* ── state ── */
+/* ── state（发票归档视图，数据来自 /api/archive） ── */
 let active=null;
+function docAmt(d){
+  const f=d.fields||{};
+  const a=num(f.total);
+  if(a!=null) return a;
+  return num(d.amount_text);
+}
 function filtered(){
   const q=$("#q").value.trim().toLowerCase();
   const ty=$("#ftype").value;
   const mn=num($("#fmin").value), mx=num($("#fmax").value);
   return DATA.docs.filter(d=>{
-    if(ty && d.doc_type!==ty) return false;
-    const am=num(d.amount_text)||num(d.details.primary_amount_value);
+    const f=d.fields||{};
+    const tyName=(d.vtype&&d.vtype.name)||"";
+    if(ty && tyName!==ty) return false;
+    const am=docAmt(d);
     if(mn!=null && (am==null||am<mn)) return false;
     if(mx!=null && (am==null||am>mx)) return false;
-    if(q){const hay=(d.title+" "+(d.doc_type||"")+" "+d.sha+" "+JSON.stringify(d.details)).toLowerCase();if(!hay.includes(q))return false;}
+    if(q){
+      const hay=JSON.stringify({file:d.file||"",fields:f,vtype:d.vtype||{},
+        fp:(d.dedup&&d.dedup.fp)||""}).toLowerCase();
+      if(!hay.includes(q)) return false;
+    }
     return true;
   });
 }
@@ -470,128 +492,142 @@ function renderList(){
   const ds=filtered();
   $("#cnt").textContent=ds.length;
   const box=$("#list");
-  if(!ds.length){box.innerHTML='<div class="empty">无匹配文档</div>';return;}
-  box.innerHTML=ds.map(d=>`
-    <div class="item ${active===d.id?'active':''}" data-id="${d.id}">
-      <div class="top"><span class="ttl">${esc(d.title||("文档 #"+d.id))}</span><span class="amt">${esc(d.amount_text||"")}</span></div>
-      <div class="sub"><span class="ty">${esc(d.doc_type||"未知")} · ${esc(d.sha)}</span>${confBar(d.confidence)}</div>
-    </div>`).join("");
+  if(!ds.length){
+    const empty = DATA.docs.length
+      ? '<div class="empty">无匹配发票</div>'
+      : '<div class="empty" style="padding-top:60px">还没有识别记录。<br>去「识别」页上传发票，结果会自动归档到这里。</div>';
+    box.innerHTML=empty; return;
+  }
+  box.innerHTML=ds.map(d=>{
+    const f=d.fields||{};
+    const amt=docAmt(d);
+    const ty=(d.vtype&&d.vtype.name)||"未知票种";
+    const dd=d.dedup||{};
+    const sig=d.signature||{};
+    const badge = dd.dup ? '<span class="pill bad">疑似重复</span>'
+      : (sig.valid ? '<span class="pill ok">验签通过</span>' : '');
+    return `<div class="item ${active===d.id?'active':''}" data-id="${d.id}">
+      <div class="top"><span class="ttl">${esc(f.invoice_number||d.file||"发票")}</span><span class="amt">${esc(amt!=null?"¥"+amt:"")}</span></div>
+      <div class="sub"><span class="ty">${esc(ty)} · ${esc((d.source==="native_xml"?"数电票原件":"图片"))}</span>${badge}</div>
+    </div>`;
+  }).join("");
   box.querySelectorAll(".item").forEach(el=>el.onclick=()=>select(+el.dataset.id));
 }
 
-/* ── render detail ── */
+/* ── render detail（发票结构化，不再套用合同 parties/obligations/seals） ── */
 function select(id){
   active=id; renderList();
   const d=DATA.docs.find(x=>x.id===id); if(!d) return;
-  const det=d.details||{};
+  const f=d.fields||{};
+  const ty=(d.vtype&&d.vtype.name)||"—";
+  const src=d.source==="native_xml"?"数电票 XML/OFD 原件":"图片 OCR";
+  const sig=d.signature||{}, dd=d.dedup||{};
   const meta=[
-    ["SHA-256",d.sha],["归档时间",d.ingested_at||"—"],["OCR 模型",det.llm_model||"qwen-vl-ocr"],
-    ["OCR 耗时",(d.ocr_s?d.ocr_s+"s":"—")],["抽取耗时",(d.llm_s?d.llm_s+"s":"—")],
-    ["融合置信度",det.fusion_overall_confidence!=null?(Number(det.fusion_overall_confidence)*100).toFixed(0)+"%":"—"]
+    ["票种",ty],["来源",src],
+    ["识别时间",d.ts?new Date(d.ts*1000).toLocaleString("zh-CN"):"—"],
+    ["明细行",String(d.items||0)],
+    ["文件",d.file||"—"]
   ];
   $("#docview").innerHTML=`
     <div class="doc-h">
-      <h1>${esc(d.title||("文档 #"+d.id))}</h1>
+      <h1>${esc(f.invoice_number||d.file||"发票")}</h1>
       <div class="meta">${meta.map(m=>`<span><b>${esc(m[0])}</b> ${esc(m[1])}</span>`).join("")}</div>
     </div>
     <div class="tabs">
       <div class="tab active" data-t="over">概览</div>
       <div class="tab" data-t="fields">抽取字段</div>
+      <div class="tab" data-t="sign">验签</div>
+      <div class="tab" data-t="dedup">查重</div>
       <div class="tab" data-t="ocr">OCR 原文</div>
-      <div class="tab" data-t="prev">预览</div>
-      <div class="tab" data-t="risk">风险 / 印章</div>
     </div>
-    <div class="pane" id="p-over">${overview(d,det)}</div>
-    <div class="pane hidden" id="p-fields">${fields(d,det)}</div>
-    <div class="pane hidden" id="p-ocr"><div class="prose">${esc(d.raw_text||"（无 OCR 原文）")}</div></div>
-    <div class="pane hidden" id="p-prev">${d.preview_img?`<div class="prev-wrap"><img src="${d.preview_img}" alt="预览"></div>`:'<div class="empty">无预览图</div>'}</div>
-    <div class="pane hidden" id="p-risk">${risk(d,det)}</div>`;
+    <div class="pane" id="p-over">${docOverview(d,f,ty,src,sig,dd)}</div>
+    <div class="pane hidden" id="p-fields">${docFields(f)}</div>
+    <div class="pane hidden" id="p-sign">${docSign(d,sig)}</div>
+    <div class="pane hidden" id="p-dedup">${docDedup(dd)}</div>
+    <div class="pane hidden" id="p-ocr"><div class="prose">${esc((d.lines||[]).map(l=>typeof l==="string"?l:(l.text||"")).join("\n")||"（无 OCR 原文）")}</div></div>`;
   $("#docview").querySelectorAll(".tab").forEach(t=>t.onclick=()=>{
     $("#docview").querySelectorAll(".tab").forEach(x=>x.classList.remove("active"));
     t.classList.add("active");
-    ["over","fields","ocr","prev","risk"].forEach(k=>$("#p-"+k).classList.toggle("hidden",k!==t.dataset.t));
+    ["over","fields","sign","dedup","ocr"].forEach(k=>$("#p-"+k).classList.toggle("hidden",k!==t.dataset.t));
   });
 }
 
-function overview(d,det){
+function docOverview(d,f,ty,src,sig,dd){
+  const amt=docAmt(d);
   const cells=[
-    ["类型",esc(d.doc_type||"—")],
-    ["金额",esc(d.amount_text||det.primary_amount_text||"—")],
-    ["关键日期",esc(det.primary_date||"—")],
-    ["计算总额",esc(det.computed_total_value||"—")],
-    ["置信度",confBar(d.confidence)],
-    ["完整性",esc(d.completeness||det.completeness||"—")],
+    ["票种",esc(ty)],
+    ["价税合计",esc(amt!=null?"¥"+amt:"—")],
+    ["税额",esc(f.tax||"—")],
+    ["开票日期",esc(f.invoice_date||"—")],
+    ["销售方",esc(f.seller_name||"—")],
+    ["购买方",esc(f.client_name||"—")],
+    ["来源",esc(src)],
+    ["明细行数",esc(String(d.items||0))],
   ];
-  const sum=det.summary?`<div class="summary">${esc(det.summary)}</div>`:`<div class="hint">该文档未生成摘要（样本为外文发票，工具面向合同设计，结构化摘要偏弱）。</div>`;
-  return sum+`<div class="grid">${cells.map(c=>`<div class="cell"><div class="k">${c[0]}</div><div class="v">${c[1]}</div></div>`).join("")}</div>`;
+  let badge="";
+  if(dd.dup) badge=`<div class="pill bad" style="margin-left:8px">疑似重复报销</div>`;
+  else if(dd.skippable) badge=`<div class="pill" style="margin-left:8px">未登记（${esc(dd.reason||"信息不足")}）</div>`;
+  else if(dd.registered||dd.registered===undefined && dd.fp) badge=`<div class="pill ok" style="margin-left:8px">已登记（未重复）</div>`;
+  const signBadge = sig.valid===true ? `<div class="pill ok">验签通过</div>`
+    : (sig.applicable===false ? `<div class="pill">无签名，未验</div>`
+    : (sig.applicable ? `<div class="pill bad">验签未通过</div>` : `<div class="pill">未验</div>`));
+  return `<div class="grid">${cells.map(c=>`<div class="cell"><div class="k">${c[0]}</div><div class="v">${c[1]}</div></div>`).join("")}</div>
+    <div class="row" style="margin-top:14px;gap:10px;align-items:center;flex-wrap:wrap">
+      <span class="lbl" style="margin:0">重复报销核查</span>${badge}
+      <span class="lbl" style="margin:0 0 0 16px">原件验签</span>${signBadge}
+    </div>`;
 }
 
-function kvTable(rows){
-  const body=rows.filter(r=>r[1]!==undefined&&r[1]!==null&&r[1]!=="")
-    .map(r=>`<tr><th>${esc(r[0])}</th><td>${r[2]!==undefined?r[2]:esc(r[1])}</td></tr>`).join("");
-  return body?`<table class="kv">${body}</table>`:`<div class="hint">无数据</div>`;
+function docFields(f){
+  const rows=[
+    ["发票代码",f.invoice_code],["发票号码",f.invoice_number],["开票日期",f.invoice_date],
+    ["销售方",f.seller_name],["购买方",f.client_name],
+    ["价税合计",f.total],["税额",f.tax],["税率",f.tax_rate],["备注",f.remark]
+  ].filter(r=>r[1]!==undefined&&r[1]!==null&&String(r[1]).trim()!=="");
+  const body=rows.map(r=>`<tr><th>${esc(r[0])}</th><td>${esc(String(r[1]))}</td></tr>`).join("");
+  return body?`<table class="kv">${body}</table>`:`<div class="hint">无结构化字段</div>`;
 }
 
-function fields(d,det){
-  let h='<div class="hint">下列字段由大模型从文档中抽取。发票类文档的「当事方 / 印章 / 义务」通常为空——这是工具面向合同设计的结构性特征，并非解析失败。</div>';
-  // 当事方
-  h+=`<div class="sec"><div class="sec-h">当事方 Parties</div>`;
-  const pa=det.parties;
-  if(Array.isArray(pa)&&pa.length){h+=kvTable(pa.map((p,i)=>["方 "+(i+1),p.name||p.role||"",`<span class="muted">${esc(p.role||"")}</span> ${esc(p.name||"")}`]));}
-  else h+=`<div class="hint">无（外文发票常缺当事方结构化字段）</div>`;
-  h+=`</div>`;
-  // 金额
-  h+=`<div class="sec"><div class="sec-h">金额 Amounts</div>`;
-  h+=kvTable([
-    ["主要金额文本",det.primary_amount_text],["主要金额数值",det.primary_amount_value],
-    ["计算总额",det.computed_total_value],["明细行数",det.line_items?det.line_items.length:""]
-  ]);
-  h+=`</div>`;
-  // 关键日期
-  h+=`<div class="sec"><div class="sec-h">关键日期 Key Dates</div>`;
-  h+=kvTable([["主要日期",det.primary_date],["签署日期",det.sign_date],["生效日期",det.effective_date]]);
-  h+=`</div>`;
-  // 义务 / 子条款
-  h+=`<div class="sec"><div class="sec-h">义务与子条款 Obligations</div>`;
-  const ob=det.obligations;
-  if(Array.isArray(ob)&&ob.length){
-    h+=`<table class="kv">${ob.slice(0,12).map(o=>`<tr><th>${esc(o.actor||"")}</th><td>${esc(o.action||o.text||"")}</td></tr>`).join("")}</table>`;
-  } else h+=`<div class="hint">无（发票通常不含义务条款）</div>`;
-  h+=`</div>`;
-  // 完整性
-  h+=`<div class="sec"><div class="sec-h">完整性 Completeness</div>`;
-  const cp=det.completeness;
-  if(cp&&typeof cp==="object"){
-    h+=kvTable(Object.entries(cp).map(([k,v])=>[k,typeof v==="object"?JSON.stringify(v):v]));
-  } else h+=kvTable([["状态",d.completeness||cp||"—"]]);
-  h+=`</div>`;
-  return h;
+function docSign(d,sig){
+  if(d.source!=="native_xml"){
+    return `<div class="hint">该发票来自图片 OCR，没有数电票 XML 原件，未做 XMLDSig 验签。要走真验签，请在「识别」页上传 .xml / .ofd 数电票原件。</div>`;
+  }
+  const ok=sig.valid===true;
+  const rows=[
+    ["验签结论", ok?"通过（真实 XMLDSig）":"未通过"],
+    ["适用性", sig.applicable?"适用":"不适用"],
+    ["算法", sig.algorithm||"SHA256-RSA"],
+    ["证书序列号", sig.cert_serial||"—"],
+    ["签名方", sig.signer||"—"],
+    ["签名时间", sig.signed_at||"—"],
+    ["说明", sig.reason||""]
+  ].filter(r=>r[1]!=="");
+  return `<div class="dcard ${ok?'dreg':'ddup'}" style="margin-top:0">
+    <div class="h">${ok?"✓ 数电票原件验签通过":"✗ 数电票原件验签未通过"}</div>
+    <div class="dt"><table>${rows.map(r=>`<tr><td class="k">${esc(r[0])}</td><td>${esc(String(r[1]))}</td></tr>`).join("")}</table></div>
+  </div>`;
 }
 
-function risk(d,det){
-  let h='<div class="hint">风险与印章核查基于大模型视觉识别。样本为外文发票，印章字段通常为空。</div>';
-  // 印章
-  const se=det.seals;
-  h+=`<div class="sec"><div class="sec-h">印章 Seals</div>`;
-  if(Array.isArray(se)&&se.length){
-    h+=se.map(s=>`<div class="risk-row"><span class="dot"></span><div class="body"><div class="h">${esc(s.owner||s.seal_type||"印章")}</div><div class="d">${esc(s.seal_type||"")} ${esc(s.verified?"· 已核验":"")}</div></div></div>`).join("");
-  } else h+=`<div class="hint">无印章记录</div>`;
-  h+=`</div>`;
-  // 身份问题
-  const ii=det.identity_issues;
-  h+=`<div class="sec"><div class="sec-h">身份一致性 Identity</div>`;
-  if(Array.isArray(ii)&&ii.length){
-    h+=ii.map(x=>`<div class="risk-row ${x.severity==='high'?'bad':x.severity==='low'?'ok':'warn'}"><span class="dot"></span><div class="body"><div class="h">${esc(x.field||"")}</div><div class="d">${esc(x.detail||x.message||"")}</div></div></div>`).join("");
-  } else h+=`<div class="risk-row ok"><span class="dot"></span><div class="body"><div class="h">未检出身份不一致</div><div class="d">文档内主体信息一致</div></div></div>`;
-  h+=`</div>`;
-  // 字段核验
-  const fv=det.field_verdicts;
-  h+=`<div class="sec"><div class="sec-h">字段核验 Field Verdicts</div>`;
-  if(Array.isArray(fv)&&fv.length){
-    h+=fv.map(x=>`<div class="risk-row ${x.verdict==='pass'?'ok':x.verdict==='fail'?'bad':'warn'}"><span class="dot"></span><div class="body"><div class="h">${esc(x.field||"")} <span class="pill ${x.verdict==='pass'?'ok':x.verdict==='fail'?'bad':'warn'}">${esc(x.verdict||"")}</span></div><div class="d">${esc(x.note||"")}</div></div></div>`).join("");
-  } else h+=`<div class="hint">无字段核验记录</div>`;
-  h+=`</div>`;
-  return h;
+function docDedup(dd){
+  if(!dd||(dd.registered===undefined&&dd.dup===undefined&&dd.skippable===undefined))
+    return `<div class="hint">该记录未走查重（仅图像 OCR 且缺关键字段，或后端未启用查重）。</div>`;
+  if(dd.dup){
+    const ex=dd.existing||{};
+    return `<div class="dcard ddup" style="margin-top:0">
+      <div class="h">⚠ 疑似重复报销</div>
+      <div class="d">指纹 ${esc((dd.fp||"").slice(0,16))}… 已存在于档案库：</div>
+      <div class="dt"><table>
+        <tr><td class="k">发票号码</td><td>${esc(ex.number||"—")}</td></tr>
+        <tr><td class="k">开票日期</td><td>${esc(ex.date||"—")}</td></tr>
+        <tr><td class="k">价税合计</td><td>${esc(ex.amount||"—")}</td></tr>
+        <tr><td class="k">销售方</td><td>${esc(ex.seller||"—")}</td></tr>
+        <tr><td class="k">首次登记</td><td>${esc(ex.created||"—")}</td></tr>
+      </table></div>
+    </div>`;
+  }
+  if(dd.skippable)
+    return `<div class="dcard dneutral" style="margin-top:0"><div class="h">未登记查重</div><div class="d">${esc(dd.reason||"字段不足，无法生成去重指纹")}</div></div>`;
+  return `<div class="dcard dreg" style="margin-top:0"><div class="h">✓ 首次登记（未重复）</div><div class="d">指纹 ${esc((dd.fp||"").slice(0,16))}… 已写入档案库，后续重复上传将被检出。</div></div>`;
 }
 
 /* ── reference drawer ── */
@@ -631,8 +667,8 @@ function toast(m){const t=$("#toast");t.textContent=m;t.classList.add("show");se
 
 /* ── wire ── */
 function fillTypes(){
-  const ts=[...new Set(DATA.docs.map(d=>d.doc_type).filter(Boolean))];
-  $("#ftype").insertAdjacentHTML("beforeend",ts.map(t=>`<option value="${esc(t)}">${esc(t)}</option>`).join(""));
+  const ts=[...new Set(DATA.docs.map(d=>(d.vtype&&d.vtype.name)||"未知").filter(Boolean))];
+  $("#ftype").innerHTML='<option value="">全部类型</option>'+ts.map(t=>`<option value="${esc(t)}">${esc(t)}</option>`).join("");
 }
 $("#q").oninput=renderList;
 $("#ftype").onchange=renderList;
@@ -640,8 +676,46 @@ $("#fmin").oninput=renderList; $("#fmax").oninput=renderList;
 $("#openRef").onclick=()=>{$("#drawer").classList.add("show");$("#scrim").classList.add("show");};
 $("#closeRef").onclick=()=>{$("#drawer").classList.remove("show");$("#scrim").classList.remove("show");};
 $("#scrim").onclick=()=>{$("#drawer").classList.remove("show");$("#scrim").classList.remove("show");};
-fillTypes(); buildRef(); renderList();
-if(DATA.docs.length) select(DATA.docs[0].id);
+buildRef(); renderList();
+
+/* ── 档案数据来源 ──
+   优先取识别页落盘的 out/results.jsonl（/api/archive），即你自己跑出来的真实结果。
+   三态明示来源，任何情况下都不把内置合成样例冒充成真实识别结果：
+     real  = 真实识别结果（有记录）
+     empty = 后端在线但还没跑过识别 → 清空样例，给引导
+     demo  = 没接本地后端（如 file:// 直开）→ 保留合成样例并明确标注
+   注意：本函数在任何环境下都不得抛出异常——它跑在共享 script 里，
+   一旦抛错会连带中断后面的批量 / 合规视图初始化。 */
+function setArc(mode,n){
+  var el=$("#arcSrc"); if(!el) return;
+  if(mode==="real"){
+    el.textContent="真实识别结果 · "+n+" 条";
+    el.style.background="#f4fbf5"; el.style.borderColor="#bfe3c6"; el.style.color="#1e8e3e";
+    el.title="来自识别页落盘的 out/results.jsonl";
+  }else if(mode==="empty"){
+    el.textContent="后端在线 · 暂无识别记录";
+    el.style.background="#fff8e6"; el.style.borderColor="#f0d9a0"; el.style.color="#8a6d1f";
+    el.title="到「识别」页上传发票，结果会自动归档到这里";
+  }else{
+    el.textContent="未接本地后端 · 当前为内置合成样例";
+    el.style.background="#fafbfc"; el.style.borderColor="var(--line-2)"; el.style.color="var(--ink-3)";
+    el.title="启动 tools/console_server.py 后，这里会显示你真实识别的发票";
+  }
+}
+function arcRender(){ fillTypes(); renderList(); if(DATA.docs.length) select(DATA.docs[0].id); }
+function loadArchive(){
+  if(typeof fetch!=="function"){ setArc("demo",0); return null; }   /* file:// 直开：无后端 */
+  return fetch("/api/archive",{cache:"no-store"}).then(r=>r.json()).then(j=>{
+    if(j.ok && Array.isArray(j.records) && j.records.length){
+      DATA.docs = j.records.map((rec,i)=>Object.assign({id:rec.ts||i}, rec));
+      setArc("real", DATA.docs.length);
+    }else if(j.ok){ DATA.docs = []; setArc("empty",0); }
+    else { setArc("demo",0); }
+  }).catch(()=>{                                                    /* 后端未启动 */
+    setArc("demo",0);
+  }).then(()=>{ try{ arcRender(); }catch(_){} });
+}
+try{ loadArchive(); }catch(e){ setArc("demo",0); try{ arcRender(); }catch(_){} }
 
 /*BATCH_JS*/
 /* ═══════════════ 批量测试工作台 ═══════════════ */
