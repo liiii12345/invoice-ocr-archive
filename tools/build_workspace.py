@@ -82,6 +82,27 @@ CSS = r"""
   textarea{width:100%;border:1px solid var(--line);border-radius:7px;background:#fafbfc;
     padding:10px 12px;font-family:var(--mono);font-size:12px;color:var(--ink);outline:none;resize:vertical}
   textarea:focus{border-color:var(--accent);background:#fff}
+  /* ── 查重 / 原件验签卡 ── */
+  .wprev-native{width:100%;height:200px;border:1px dashed var(--line);border-radius:8px;
+    display:flex;flex-direction:column;align-items:center;justify-content:center;
+    background:#f5f8ff;color:var(--accent);font-size:14px;font-weight:600;text-align:center}
+  .wprev-native small{margin-top:8px;font-size:11px;font-weight:500;color:var(--ink-3)}
+  .dcard{border:1px solid var(--line-2);border-radius:8px;padding:12px 14px;margin-top:16px;
+    background:#fafbfc}
+  .dcard .h{font-size:12.5px;font-weight:600;margin-bottom:8px}
+  .dcard .d{font-size:12px;color:var(--ink-2);line-height:1.5}
+  .dcard .dt{margin-top:8px}
+  .dcard .dt td{border:none;padding:3px 0;font-size:11.5px}
+  .dcard .dt td.k{color:var(--ink-3);white-space:nowrap;width:84px}
+  .dcard .dt td:not(.k){font-family:var(--mono);text-align:right}
+  .ddup{border-color:#f0b4b0;background:#fff5f4}
+  .ddup .h{color:#c0392b}
+  .dreg{border-color:#bfe3c6;background:#f4fbf5}
+  .dreg .h{color:#1e8e3e}
+  .dneutral{border-color:var(--line-2);background:#fafbfc}
+  .dneutral .h{color:var(--ink-2)}
+  .dnative{border-color:#cfe0ff;background:#f5f8ff}
+  .dnative .h{color:#2b6cb0}
 /*WORK_CSS_END*/
 """
 
