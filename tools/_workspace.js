@@ -39,7 +39,7 @@ function wDropHtml(){
       <path d="M12 16V4m0 0L8 8m4-4 4 4"/><path d="M3 16v3a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-3"/>
     </svg>
     <div class="t">把发票图片拖到这里</div>
-    <div class="s">单张或多张都行 · jpg / png / webp / bmp / tif · 单张 ≤ 30MB</div>
+    <div class="s">图片或数电票原件都行 · jpg/png/webp/bmp/tif · 数电票 xml/ofd（直接读原件，比 OCR 更准）· 单张 ≤ 30MB</div>
     <button class="btn primary" id="wDropBtn" style="margin-top:14px">选择文件</button>
     <div class="s" style="margin-top:12px">图片只发到本机 127.0.0.1 的后端，不会上传到任何外部服务</div>
   </div>`;
@@ -108,7 +108,7 @@ function wAddFiles(list){
   const ok = [];
   for (const f of list) {
     const ext = (f.name.match(/\.[^.]+$/) || [""])[0].toLowerCase();
-    if (![".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tif", ".tiff"].includes(ext)) continue;
+    if (![".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tif", ".tiff", ".xml", ".ofd"].includes(ext)) continue;
     if (f.size > 30 * 1024 * 1024) continue;
     /* 预览图地址不一定拿得到（非浏览器环境、或策略限制），拿不到就用占位块，别整条挂掉 */
     let url = "";
@@ -116,7 +116,7 @@ function wAddFiles(list){
     ok.push({ id: W.nextId++, file: f, name: f.name, size: f.size,
               url: url, state: "wait", rec: null, err: "" });
   }
-  if (!ok.length) { toast("没有可用图片（仅 jpg/png/webp/bmp/tif，单张 ≤30MB）"); return; }
+  if (!ok.length) { toast("仅支持 jpg/png/webp/bmp/tif 图片，或数电票 xml/ofd 原件（单张 ≤30MB）"); return; }
   W.files = W.files.concat(ok);
   if (!W.cur) W.cur = ok[0].id;
   wRenderSide(); wRenderBody();
@@ -242,6 +242,53 @@ function wComplianceCards(rec){
     '</div>';
 }
 
+/* ── 跨文档查重卡（堵重复报销）── */
+function wDedupCard(rec){
+  const d = rec.dedup;
+  if (!d) return "";
+  if (d.error) return '<div class="dcard dneutral"><div class="h">重复报销核查</div>' +
+    '<div class="d">查重暂不可用：' + esc(d.error) + '</div></div>';
+  if (d.skippable) return '<div class="dcard dneutral"><div class="h">重复报销核查</div>' +
+    '<div class="d">关键字段（发票代码 / 号码 / 日期 / 金额）不全，无法生成查重指纹：' +
+    esc(d.reason || "信息不足") + '</div></div>';
+  if (d.dup) {
+    const e = d.existing || {};
+    return '<div class="dcard ddup"><div class="h">⚠ 疑似重复报销</div><div class="d">' +
+      '本机档案已存在同一张发票（指纹 ' + esc((d.fp || "").slice(0, 12)) + '…）。' +
+      '<table class="dt"><tbody>' +
+      (e.code ? '<tr><td class="k">发票代码</td><td>' + esc(e.code) + '</td></tr>' : '') +
+      (e.number ? '<tr><td class="k">发票号码</td><td>' + esc(e.number) + '</td></tr>' : '') +
+      (e.date ? '<tr><td class="k">开票日期</td><td>' + esc(e.date) + '</td></tr>' : '') +
+      (e.amount ? '<tr><td class="k">价税合计</td><td>' + esc(e.amount) + '</td></tr>' : '') +
+      (e.source ? '<tr><td class="k">来源</td><td>' + esc(e.source) + '</td></tr>' : '') +
+      (e.created ? '<tr><td class="k">首次登记</td><td>' + esc(e.created) + '</td></tr>' : '') +
+      '</tbody></table></div></div>';
+  }
+  if (d.registered) return '<div class="dcard dreg"><div class="h">✓ 首次登记</div><div class="d">' +
+    '本张发票已记入本机查重档案（指纹 ' + esc((d.fp || "").slice(0, 12)) + '…），后续上传同号将被标记重复。</div></div>';
+  return "";
+}
+
+/* ── 数电票原件 XMLDSig 验签卡（仅 native 源）── */
+function wNativeSigCard(rec){
+  const s = rec.signature;
+  const info = rec.native_info || {};
+  const head = '<div class="dcard dnative"><div class="h">数电票原件验签（XMLDSig）</div>';
+  if (!s || s.applicable === false)
+    return head + '<div class="d">该 XML 不含税务数字签名，或未取到，本次仅做结构化解析（不伪造验签结论）。</div></div>';
+  const ok = s.valid === true;
+  let rows = '<table class="dt"><tbody>' +
+    '<tr><td class="k">结论</td><td>' + (ok ? '验签通过（真实 C14N+RSA-SHA256）' : '验签未通过') + '</td></tr>' +
+    (s.algorithm ? '<tr><td class="k">算法</td><td>' + esc(s.algorithm) + '</td></tr>' : '') +
+    (s.cert_serial ? '<tr><td class="k">证书序列号</td><td>' + esc(s.cert_serial) + '</td></tr>' : '') +
+    (s.signer ? '<tr><td class="k">签名方</td><td>' + esc(s.signer) + '</td></tr>' : '') +
+    (s.reason ? '<tr><td class="k">说明</td><td>' + esc(s.reason) + '</td></tr>' : '') +
+    '</tbody></table>';
+  if (info.ofd) rows += '<div class="hint">来源：OFD 内嵌结构化 XML（' +
+    esc((info.files || []).join(", ")) + '）</div>';
+  return head + '<div class="d">' + rows + '</div></div>';
+}
+
 function wDetail(f){
   const rec = f.rec || {};
   if (!rec.ok) {
@@ -251,27 +298,36 @@ function wDetail(f){
       '</div></div></div>';
   }
   const v = rec.vtype || {};
+  const isNative = (rec.source || "").indexOf("native") === 0;
   const meta = [
     ["票种", (v.name || "未知") + (v.code ? "（" + v.code + "）" : "")],
+    ["来源", isNative ? "数电票原件（原生解析）" : "OCR 图像"],
     ["置信", v.confidence != null ? Number(v.confidence).toFixed(2) : "—"],
     ["OCR 行数", String(rec.line_count || 0)],
     ["平均置信", rec.avg_conf != null ? Number(rec.avg_conf).toFixed(3) : "—"],
     ["耗时", (rec.elapsed != null ? rec.elapsed : "—") + "s"],
     ["策略", rec.extractor || W.ext],
   ];
+  const leftInner = isNative
+    ? '<div class="wprev wprev-native">数电票原件<br><small>' +
+        (rec.source === "native_ofd" ? "OFD 解包 · 内嵌 XML" : "XML 直读") + '</small></div>' +
+      '<div class="grid2">' + meta.map(m => '<div class="cell"><div class="k">' +
+        esc(m[0]) + '</div><div class="v">' + esc(m[1]) + '</div></div>').join("") + '</div>'
+    : '<img class="wprev" src="' + f.url + '" alt="">' +
+      '<div class="grid2">' + meta.map(m => '<div class="cell"><div class="k">' +
+        esc(m[0]) + '</div><div class="v">' + esc(m[1]) + '</div></div>').join("") + '</div>';
   let h = '<div class="card"><div class="card-h"><span class="t">' + esc(f.name) + '</span>' +
-    '<span class="h">' + wSize(f.size) + ' · ' + (rec.img_size ? rec.img_size.join("×") : "") + '</span></div>' +
-    '<div class="card-b"><div class="wview"><div class="wleft">' +
-    '<img class="wprev" src="' + f.url + '" alt="">' +
-    '<div class="grid2">' + meta.map(m => '<div class="cell"><div class="k">' +
-      esc(m[0]) + '</div><div class="v">' + esc(m[1]) + '</div></div>').join("") + '</div>' +
+    '<span class="h">' + wSize(f.size) + (isNative ? '' : (' · ' + (rec.img_size ? rec.img_size.join("×") : ""))) + '</span></div>' +
+    '<div class="card-b"><div class="wview"><div class="wleft">' + leftInner +
     (v.evidence && v.evidence.length ? '<div class="hint">判定依据：' +
       esc(v.evidence.join("、")) + '</div>' : '') +
     '</div><div class="wright">' +
     '<div class="sec-h">抽取字段</div>' + wFieldsTable(rec) +
     '<div class="sec-h" style="margin-top:20px">明细行（' + ((rec.items || []).length) + '）</div>' +
     wItemsTable(rec.items) +
+    (isNative ? wNativeSigCard(rec) : '') +
     wComplianceCards(rec) +
+    wDedupCard(rec) +
     '</div></div></div></div>';
   const lines = rec.lines || [];
   if (lines.length) {
@@ -310,7 +366,7 @@ function wRenderBody(){
   const btn = $w("#wDropBtn");
   const pick = () => {
     const inp = document.createElement("input");
-    inp.type = "file"; inp.multiple = true; inp.accept = ".jpg,.jpeg,.png,.webp,.bmp,.tif,.tiff";
+    inp.type = "file"; inp.multiple = true; inp.accept = ".jpg,.jpeg,.png,.webp,.bmp,.tif,.tiff,.xml,.ofd";
     inp.onchange = () => { wAddFiles(Array.from(inp.files || [])); };
     inp.click();
   };
