@@ -36,7 +36,7 @@ MAX_UPLOAD_MB = 30       # 单文件上限
 UPLOAD_DIR = os.path.join(ROOT, "uploads")
 
 IMG_EXT = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tif", ".tiff"}
-UPLOAD_EXT = IMG_EXT | {".pdf"}
+UPLOAD_EXT = IMG_EXT | {".pdf", ".xml", ".ofd"}
 
 
 def _has_ocr():
@@ -271,6 +271,8 @@ def capabilities():
         "compliance_xml": pi["provider"] != "",
         "compliance_sign": True,                       # Mock 模式下用的是真 XMLDSig 验签
         "compliance_verify": True,
+        "dedup": True,                                 # 跨文档重复报销检测（本地 SQLite）
+        "native_xml": True,                            # 数电票 XML / OFD 原生解析
     }}
 
 
@@ -543,6 +545,16 @@ class Handler(BaseHTTPRequestHandler):
             if isinstance(r, dict):
                 r["_file"] = {"name": orig, "saved": safe, "bytes": len(f["data"])}
                 r["_server_elapsed"] = round(time.time() - t0, 2)
+                # 跨文档查重：识别结果自动登记，返回是否重复（堵重复报销）
+                try:
+                    if os.path.join(ROOT, "src") not in sys.path:
+                        sys.path.insert(0, os.path.join(ROOT, "src"))
+                    from dedup import DedupDB
+                    dd = DedupDB().register(r.get("fields") or {},
+                                            (r.get("vtype") or {}).get("code"), "upload")
+                    r["dedup"] = dd
+                except Exception as e:  # noqa
+                    r["dedup"] = {"error": "%s" % e}
             return self._body(200, r if isinstance(r, dict)
                               else {"ok": False, "error": str(r)})
 
@@ -579,6 +591,31 @@ class Handler(BaseHTTPRequestHandler):
                 p = get_provider()
                 res = p.verify_signature(xml, j.get("req"))
                 return self._body(200, {"ok": True, "provider": p.name, **res.to_dict()})
+            except Exception as e:  # noqa
+                return self._body(500, {"ok": False, "message": "%s: %s" % (type(e).__name__, e)})
+
+        # ── 查重（登记后的复核 / 列档案 / 清空）──
+        if path == "/api/dedup":
+            try:
+                j = json.loads(body.decode("utf-8", "ignore")) if body else {}
+            except Exception:  # noqa
+                j = {}
+            if os.path.join(ROOT, "src") not in sys.path:
+                sys.path.insert(0, os.path.join(ROOT, "src"))
+            try:
+                from dedup import DedupDB
+                db = DedupDB()
+                act = (j.get("action") or "check")
+                if act == "list":
+                    return self._body(200, {"ok": True,
+                                            "items": db.list_all(int(j.get("limit", 200))),
+                                            "count": db.count()})
+                if act == "clear":
+                    db.clear()
+                    return self._body(200, {"ok": True, "cleared": True})
+                c = db.check(j.get("number", ""), j.get("code", ""),
+                             j.get("date", ""), j.get("amount", ""))
+                return self._body(200, {"ok": True, **c})
             except Exception as e:  # noqa
                 return self._body(500, {"ok": False, "message": "%s: %s" % (type(e).__name__, e)})
 
