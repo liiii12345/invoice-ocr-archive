@@ -34,6 +34,7 @@ SCAN_MAX_DEPTH = 3       # 数据集扫描最深几层
 SCAN_MAX_ITEMS = 60      # 数据集下拉最多列多少条
 MAX_UPLOAD_MB = 30       # 单文件上限
 UPLOAD_DIR = os.path.join(ROOT, "uploads")
+ARCHIVE_DIR = os.path.join(ROOT, "out")          # 识别结果归档（供「档案」视图读取）
 
 IMG_EXT = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tif", ".tiff"}
 UPLOAD_EXT = IMG_EXT | {".pdf", ".xml", ".ofd"}
@@ -162,6 +163,47 @@ def read_results(out):
     return rows[:MAX_ROWS], None
 
 
+def _flat_fields(fields):
+    """把 {key:{value:...}} 形状压成 {key:value}，供档案视图直接读。"""
+    out = {}
+    for k, v in (fields or {}).items():
+        if isinstance(v, dict) and "value" in v:
+            out[k] = v.get("value")
+        else:
+            out[k] = v
+    return out
+
+
+def _persist_archive(r, fname):
+    """把识别结果追加写进 out/results.jsonl，供「档案」视图读取。
+
+    只落结构化结果（无原图、无凭据、无密钥），符合本机回环 + 脱敏红线。
+    """
+    try:
+        os.makedirs(ARCHIVE_DIR, exist_ok=True)
+        sig = r.get("signature") or {}
+        rec = {
+            "ts": round(time.time(), 3),
+            "file": fname,
+            "source": r.get("source") or ("native_xml" if r.get("native_info") else "image"),
+            "ok": bool(r.get("ok")),
+            "vtype": {"code": (r.get("vtype") or {}).get("code"),
+                      "name": (r.get("vtype") or {}).get("name")},
+            "fields": _flat_fields(r.get("fields") or {}),
+            "items": len(r.get("items") or []),
+            "lines": (r.get("lines") or [])[:80] if isinstance(r.get("lines"), list) else [],
+            "signature": {"valid": sig.get("valid"), "applicable": sig.get("applicable"),
+                          "reason": sig.get("reason"), "algorithm": sig.get("algorithm"),
+                          "cert_serial": sig.get("cert_serial"), "signer": sig.get("signer"),
+                          "signed_at": sig.get("signed_at")},
+            "dedup": r.get("dedup") or {},
+        }
+        with open(os.path.join(ARCHIVE_DIR, "results.jsonl"), "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
+    except Exception:  # noqa  归档失败绝不让主识别结果失败
+        pass
+
+
 def parse_multipart(body, boundary):
     """极简 multipart/form-data 解析：只取普通字段与文件。
 
@@ -209,6 +251,14 @@ def run_ocr_file(path, extractor="rule", with_compliance=False,
         import io as _io, contextlib
         if os.path.join(ROOT, "src") not in sys.path:
             sys.path.insert(0, os.path.join(ROOT, "src"))
+        # 让进程内 LLM 也能吃前端传来的 key（仅写内存环境变量，不落盘、不进日志）
+        if api_key:
+            os.environ["OCR_LLM_API_KEY"] = api_key
+            os.environ["DASHSCOPE_API_KEY"] = api_key
+        if base_url:
+            os.environ["OCR_LLM_BASE_URL"] = base_url
+        if model:
+            os.environ["OCR_LLM_MODEL"] = model
         from ocr_service import run_ocr, run_compliance
         noise = _io.StringIO()
         try:
@@ -429,6 +479,27 @@ class Handler(BaseHTTPRequestHandler):
                 return self._body(404, {"ok": False, "message": err})
             return self._body(200, {"ok": True, "out": out, "rows": rows})
 
+        if path == "/api/archive":
+            # 识别页产出归档：out/results.jsonl（与批量 results.csv 区分开）
+            fp = os.path.join(ARCHIVE_DIR, "results.jsonl")
+            if not os.path.isfile(fp):
+                return self._body(200, {"ok": True, "total": 0, "records": []})
+            try:
+                recs = []
+                with open(fp, encoding="utf-8") as fh:
+                    for line in fh:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            recs.append(json.loads(line))
+                        except Exception:  # noqa
+                            pass
+                recs = recs[-MAX_ROWS:]
+            except Exception as e:  # noqa
+                return self._body(500, {"ok": False, "message": repr(e)})
+            return self._body(200, {"ok": True, "total": len(recs), "records": recs})
+
         if path == "/api/run":
             # 参数校验 + 路径白名单
             # 读路径（--input/--truth/--base）放开：真实数据集常在仓库外；
@@ -555,6 +626,9 @@ class Handler(BaseHTTPRequestHandler):
                     r["dedup"] = dd
                 except Exception as e:  # noqa
                     r["dedup"] = {"error": "%s" % e}
+                # 结果归档：识别成功即落 out/results.jsonl，供「档案」视图读取
+                if isinstance(r, dict) and r.get("ok"):
+                    _persist_archive(r, orig)
             return self._body(200, r if isinstance(r, dict)
                               else {"ok": False, "error": str(r)})
 
