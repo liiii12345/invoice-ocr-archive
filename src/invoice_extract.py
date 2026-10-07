@@ -181,6 +181,16 @@ def extract(raw_lines, img_w=1654):
     for k in ("due_date", "discount", "bank_name", "account_number"):
         put(k, "", None)
 
+    # ── 5.1 单元格级增强：自适应列还原（替代硬编码 640/880/1300 阈值，跨图宽泛化）──
+    # 原「坐标近似」逻辑作为兜底：自适应列抽得更多或更准时优先采用，否则回退。
+    try:
+        from table_struct import restore_table
+        enh = restore_table(L, img_w)
+        if enh and len(enh) >= len(items):
+            items, items_ev = enh, []
+    except Exception:  # noqa  增强失败绝不影响主流程
+        pass
+
     out["_items"] = items
     out["_items_evidence"] = _ev(items_ev) if items_ev else {"lines": [], "conf": 0.0, "box": None}
     return out
