@@ -23,6 +23,7 @@ from invoice_extract import extract          # 规则抽取器（版面坐标推
 from llm_extract import hybrid_extract, llm_extract, LLMConfig, FIELD_KEYS
 from vtype_classify import classify as classify_vtype
 from compliance_provider import get_provider, MockComplianceProvider, applicability
+import ofd_parser, einvoice_xml                # 数电票 OFD / XML 原生解析
 
 _compliance = None
 def compliance():
@@ -181,10 +182,78 @@ def _infer_robust(arr, im, img_w):
     raise RuntimeError("OCR 推理失败，已尝试 100%%/75%%/50%% 三档：%s" % " | ".join(tries))
 
 
+def run_parse_native(path, extractor="rule"):
+    """原生解析数电票 XML / OFD（不走 OCR 引擎）。
+
+    · .ofd → 解包抽取内嵌结构化 XML；.xml → 直接解析
+    · einvoice_xml.parse 提取字段（比 OCR 准），复用 vtype_classify 判票种
+    · 若 XML 含税务数字签名（ds:Signature），复用 compliance_provider 验真
+    返回与图片 run_ocr 同形结构，前端复用同一套字段渲染。
+    """
+    import time as _t
+    t0 = _t.time()
+    low = path.lower()
+    try:
+        if low.endswith(".ofd"):
+            with open(path, "rb") as f:
+                xml_text, info = ofd_parser.extract_xml(f.read())
+            if not xml_text:
+                return {"ok": False, "error": "OFD 内未找到结构化发票 XML：%s" % info.get("error", ""),
+                        "elapsed": round(_t.time() - t0, 3), "source": "native_ofd",
+                        "fields": {}, "items": [], "lines": []}
+        else:
+            with open(path, encoding="utf-8", errors="ignore") as f:
+                xml_text = f.read()
+            info = {"ofd": False, "found": path}
+    except Exception as e:  # noqa
+        return {"ok": False, "error": "读取原件失败：%s" % e, "elapsed": round(_t.time() - t0, 3),
+                "source": "native_xml", "fields": {}, "items": [], "lines": []}
+
+    pr = einvoice_xml.parse(xml_text)
+    if not pr["ok"]:
+        return {"ok": False, "error": "XML 解析失败：%s" % pr.get("error", ""),
+                "elapsed": round(_t.time() - t0, 3), "source": "native_xml",
+                "fields": {}, "items": [], "lines": []}
+
+    # 票种判定：复用 vtype_classify（基于 XML 文本关键词，对数电票画像有效）
+    vtype = classify_vtype(xml_text)
+    # 字段包装成与图片 OCR 同形（evidence=None，native 无需图上描边）
+    fields = {}
+    for k, v in pr["fields"].items():
+        val = v.get("value", "") if isinstance(v, dict) else v
+        fields[k] = {"value": val, "evidence": None, "source": "native_xml",
+                     "status": "native", "llm_value": "", "rule_value": val}
+    items = [{"description": it.get("description", ""), "quantity": it.get("quantity", ""),
+               "total_price": it.get("total_price", ""), "unit_price": it.get("unit_price", ""),
+               "tax": it.get("tax", ""), "evidence": None, "status": "native",
+               "alt_quantity": "", "alt_total_price": ""} for it in pr["_items"]]
+
+    # 顺带验签（若 XML 含税务数字签名）；无 crypto / 无签名时如实降级
+    signature = None
+    try:
+        signature = compliance().verify_signature(xml_text, vtype.get("requirements")).to_dict()
+    except Exception as e:  # noqa
+        signature = {"valid": False, "reason": "验签不可用：%s" % e, "applicable": None}
+
+    return {
+        "ok": True, "source": ("native_ofd" if low.endswith(".ofd") else "native_xml"),
+        "elapsed": round(_t.time() - t0, 3), "extractor": extractor,
+        "vtype": vtype, "fields": fields, "items": items,
+        "items_evidence": {"lines": [], "conf": 0.0, "box": None},
+        "signature": signature, "native_info": info,
+        "lines": [], "text": xml_text[:2000], "avg_conf": 1.0, "line_count": 0,
+        "img_size": [0, 0],
+        "extract_meta": {"mode": "native_xml", "has_items": pr.get("has_items")},
+    }
+
+
 def run_ocr(source, extractor="rule"):
-    """source: 图片路径 或 numpy 数组。返回 OCR 行 + 抽取字段（含证据坐标与放大图）"""
+    """source: 图片路径 / numpy 数组 / 数电票 .xml .ofd 路径。
+    返回 OCR 行 + 抽取字段（含证据坐标与放大图）。"""
     import numpy as np
     from PIL import Image
+    if isinstance(source, str) and source.lower().endswith((".xml", ".ofd")):
+        return run_parse_native(source, extractor)
     if isinstance(source, str):
         im = Image.open(source).convert("RGB")
         img_w, img_h = im.size
