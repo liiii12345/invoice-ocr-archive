@@ -140,6 +140,15 @@ DOM = """
       <div>
         <div class="lbl">数据集</div>
         <select id="bDs"><option value="">—</option></select>
+        <div style="margin-top:7px;font-size:11px;line-height:1.55;color:var(--ink-3)">
+          <strong style="color:var(--ink-2)">数据来源</strong>＝本机<strong>文件夹</strong>数据集（后端
+          <span style="font-family:var(--mono)">--scan</span> 扫描得到），
+          <strong>不是</strong>浏览器拖拽上传。<br>
+          跑自己的发票：把图片放进一个文件夹 → 用
+          <span style="font-family:var(--mono)">--scan &lt;文件夹&gt;</span> 启动后端 →
+          点下方「重新扫描本机数据集」。<br>
+          后端未启动时只剩内置样例，页面指标为<strong>推算值</strong>，非真实跑批结果。
+        </div>
       </div>
     </div>
     <div class="list" id="bTaskList"></div>
