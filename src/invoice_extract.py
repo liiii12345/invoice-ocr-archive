@@ -62,6 +62,58 @@ def _ev(lines):
     }
 
 
+# ── 中文票面「标签：值」解析 ──
+# 上面的版面规则是为英文发票写的（invoice no / date of issue / seller: / items 表头），
+# 中文票面（发票号码 / 开票日期 / 销售方 / 价税合计）一个都匹配不上 —— 实测中文图主字段全空。
+# 这里补一层中文解析：按全角/半角冒号拆「标签：值」，只填空着的字段，不覆盖英文逻辑已抽到的结果。
+_CN_FIELDS = [
+    ("invoice_code",   r"发票代码|代码",                          "num"),
+    ("invoice_number", r"发票号码|发票号|票号",                    "num"),
+    ("invoice_date",   r"开票日期|开票日|日期",                    "date"),
+    ("seller_name",    r"销售方(名称)?|卖方(名称)?",                "text"),
+    ("client_name",    r"购买方(名称)?|买方(名称)?|客户(名称)?",      "text"),
+    ("tax_rate",       r"税率",                                 "text"),
+    ("tax",            r"税额",                                 "money"),
+    ("total",          r"价税合计|合计金额",                       "money"),
+]
+# 大写金额（壹贰叁…）与「不含税合计」都不是价税合计/税额
+_CN_UPPER = re.compile(r"[壹贰叁肆伍陆柒捌玖拾佰仟万亿圆整]")
+
+
+def _cn_value(tail, kind):
+    if kind == "money":
+        m = re.search(r"([0-9][0-9,]*(?:\.[0-9]{1,2})?)", tail)
+        return m.group(1).replace(",", "") if m else ""
+    if kind == "date":
+        m = re.search(r"(\d{4}\s*[-/年]\s*\d{1,2}\s*[-/月]\s*\d{1,2})", tail)
+        return re.sub(r"\s", "", m.group(1)) if m else ""
+    if kind == "num":
+        m = re.search(r"([0-9]{6,})", tail)
+        return m.group(1) if m else ""
+    return tail.strip()
+
+
+def _cn_fill(L, out):
+    for l in L:
+        t = (l.text or "").strip()
+        if not t:
+            continue
+        for key, pat, kind in _CN_FIELDS:
+            if not re.search(pat, t):
+                continue
+            if kind == "money" and (_CN_UPPER.search(t) or "不含税" in t):
+                continue
+            cur = out.get(key) or {}
+            if cur.get("value"):
+                continue
+            parts = re.split(r"[:：]\s*", t, maxsplit=1)
+            tail = parts[1] if len(parts) == 2 else t
+            tail = re.sub(r"^\s*" + pat + r"\s*[:：]?\s*", "", tail).strip()
+            v = _cn_value(tail, kind)
+            if v:
+                out[key] = {"value": v, "evidence": _ev([l])}
+
+
 def extract(raw_lines, img_w=1654):
     """返回 {字段: {'value':..., 'evidence':{...}}}；未抽到则 value 为空"""
     L = to_lines(raw_lines)
@@ -176,6 +228,9 @@ def extract(raw_lines, img_w=1654):
             tax_val, tax_ev = "%.2f" % parse_amount(cand2[0].text), _ev([cand2[0]])
     put("tax", tax_val, tax_ev)
     put("total", total_val, tot_ev)
+
+    # ── 6.1 中文票面补充：英文规则抽不到的字段，按「标签：值」再解一次（只填空）──
+    _cn_fill(L, out)
 
     # ── 7. 该版式不存在的字段：保持空（诚实呈现「未识别」） ──
     for k in ("due_date", "discount", "bank_name", "account_number"):
