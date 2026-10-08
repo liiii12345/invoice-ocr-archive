@@ -289,7 +289,7 @@ python tools/console_server.py --python ../venv/Scripts/python.exe       # OCR �
 │           node tools/_check_batch_ui.js && node tools/_check_opt.js
 │           node tools/_check_workspace.js
 │           node tools/_check_upload.js <一张发票图片>   # 需先起后端
-├── docs/                             设计说明、真实性与边界说明、接入指南、页签示意图、可优化点清单
+├── docs/                             设计说明、真实性与边界说明、接入指南、页签示意图
 ├── requirements.txt
 └── LICENSE
 ```
@@ -386,9 +386,7 @@ python tools/build_console.py <本地demo_console.html> demo_console.html
 
 ---
 
-## 竞品对比与完善路线（摘要）
-
-完整版见 [docs/竞品对比与完善路线.md](./docs/竞品对比与完善路线.md)。
+## 定位与差异化
 
 **定位**：这是「发票 OCR + 税务合规核验」的**脱敏复刻版 / 作品集项目**——
 对标分两层：底层和 PaddleOCR / RapidOCR / Tesseract / Surya / invoice2data 比识别抽取；
@@ -398,22 +396,11 @@ python tools/build_console.py <本地demo_console.html> demo_console.html
 
 - 本地化、**数据不出本机**、验签可自测可审计；
 - 税务数字签名验签是**真 XMLDSig**（C14N + RSA-SHA256 + 摘要比对），Mock/Real 共用 `_xml_verify`；
-- **票种驱动适用性判定**：对非国内票据如实返回「不适用」，不伪造结果。
-
-**与商业平台的可见差距（大多纯本地就能补）**：
-
-| 差距 | 性质 | 完善路线位置 | 状态 |
-| :- | :- | :- | :- |
-| 表格结构还原靠坐标近似，不如 PP-Structure | 本地可做 | 路线 #3 | ✅ 已做自适应列检测（2026-10-07） |
-| 缺数电票 OFD/XML 原生解析 | 本地可做 | 路线 #2 | ✅ 已实现（2026-10-07） |
-| 无跨文档查重 | 本地可做 | 路线 #1 | ✅ 已实现（2026-10-07） |
-| 票种仅 9 类，未覆盖全票种 | 本地可做 | 路线 #4 | 待定 |
-| 国密 SM2 验签（cryptography 不支持） | 本地可做 | 路线 #5 | 待定 |
-| 无带数字签名的合规核验报告（单套制） | 本地可做 | 路线 #6 | 待定 |
-| 真实税局查验直连 | ⚙️ 需配保密凭据（Real Provider） | 路线同真实系统，凭据不外带 | 已实现（凭据不外带） |
+- **票种驱动适用性判定**：对非国内票据如实返回「不适用」，不伪造结果；
+- 数电票支持 **OFD / XML 原件原生解析**（绕过图片二传，精度更高且自带签名可验）。
 
 > 凡涉及税局真实交互的项，公开仓库一律保持**可插拔 Real Provider + 环境变量隔离**：
-> 不落盘、不发真实请求、不把合成结果显示成真实查验结论。完善 ≠ 假装接入。
+> 不落盘、不发真实请求、不把合成结果显示成真实查验结论。
 
 ---
 
