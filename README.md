@@ -167,6 +167,22 @@ python src/batch_run.py --input list.txt --extractor hybrid --workers 4 --out ou
 实测（英文商业发票 20 张，`--extractor rule`）：20/20 成功，
 字段准确率 5/6 = 1.0（total 0.95），明细全对 19/20，平均 7.6s/张、约 7.8 张/分钟。
 
+#### 中文票面：原本抽不出字段，已修
+
+规则抽取器最初是按**英文版面**写的：靠 `Invoice No` / `Date of Issue` / `Seller:` / `Client:`
+和 `Items` / `Summary` 表头定位，列区间也是按 1654px 宽的英文发票定的阈值。
+这套规则遇到中文票面（`发票号码` / `开票日期` / `销售方` / `购买方` / `价税合计`）
+**一个都匹配不上，主字段会全空**——OCR 本身读对了，是抽取规则不认中文。
+
+已在 `src/invoice_extract.py` 补一层中文解析（`_cn_fill`）：按全角/半角冒号拆「标签：值」，
+覆盖发票代码 / 发票号码 / 开票日期 / 销售方 / 购买方 / 税率 / 税额 / 价税合计，
+并排除「价税合计（大写）壹仟圆整」和「合计（不含税）」这两类容易误取的金额行。
+**只填空着的字段，不覆盖英文逻辑已抽到的结果**，所以英文版式不受影响。
+
+中文实测（PIL 现画的中文票样，非真实票据扫描件）：7 个主字段全中——
+`发票代码 011002100311` / `发票号码 25117000000123456789` / `开票日期 2026-03-15` /
+销售方 / 购买方 / `税额 384.00` / `价税合计 5584.00`，明细 2 行金额也对。
+
 ### 批量测试页签（图形界面）
 
 命令行能用之后，同一套参数被搬进了控制台——`demo_console.html` 顶栏切到**「批量测试」**就是工作台。
@@ -240,7 +256,7 @@ python tools/console_server.py --python ../venv/Scripts/python.exe       # OCR �
 │   ├── compliance_provider.py        ★ 合规能力：法定原件 / 验签 / 查验，Mock 与 Real 同接口
 │   ├── ocr_service.py                本地服务入口（HTTP + 批处理）
 │   ├── ocr_once.py                   ★ 单张识别入口：图片 → JSON（后端 spawn 用）
-│   ├── invoice_extract.py            规则抽取器（版面坐标推理）
+│   ├── invoice_extract.py            规则抽取器（版面坐标推理 + 中文「标签：值」解析）
 │   ├── dedup.py                       ★ 跨文档查重引擎（SQLite 指纹，堵重复报销）
 │   ├── einvoice_xml.py                ★ 数电票 XML 原生解析（结构化字段，复用 _xml_verify）
 │   ├── ofd_parser.py                  ★ OFD 解包抽取内嵌结构化发票 XML
