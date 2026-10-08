@@ -349,7 +349,11 @@
   <aside class="side">
     <div class="side-h"><span class="t">发票档案</span><span class="c" id="cnt">0</span></div>
     <div class="filters">
-      <div id="arcSrc" class="pill" style="align-self:flex-start">数据来源检测中…</div>
+      <div class="row" style="align-items:center;gap:6px">
+        <div id="arcSrc" class="pill" style="flex:1;text-align:center">数据来源检测中…</div>
+        <button class="btn" id="arcRefresh" style="height:24px;padding:0 9px;font-size:11px;flex:none"
+                title="重新读取 out/results.jsonl">刷新</button>
+      </div>
       <div class="row">
         <select id="ftype"><option value="">全部类型</option></select>
       </div>
@@ -716,6 +720,22 @@ function loadArchive(){
   }).then(()=>{ try{ arcRender(); }catch(_){} });
 }
 try{ loadArchive(); }catch(e){ setArc("demo",0); try{ arcRender(); }catch(_){} }
+
+/* 档案页刷新：loadArchive 原本只在启动时拉一次，于是
+   「先开控制台（档案为空）→ 去识别页跑一批 → 切回档案」会停在旧状态，看着像没归档。
+   补两处：① 点顶栏「档案」就重拉 ② 侧栏「刷新」按钮手动重拉。
+   用 document 事件委托绑定，顶栏按钮即便被重建也不失效。 */
+function arcRefreshNow(){
+  try{ loadArchive(); }catch(e){}
+  if(typeof toast==="function") toast("已重新读取归档");
+}
+try{
+  var _rb=$("#arcRefresh"); if(_rb) _rb.onclick=arcRefreshNow;
+  document.addEventListener("click", function(e){
+    var t=e.target; if(!t||!t.closest) return;
+    if(t.closest(".seg button[data-v='doc']")) arcRefreshNow();
+  }, true);
+}catch(e){}
 
 /*BATCH_JS*/
 /* ═══════════════ 批量测试工作台 ═══════════════ */
